@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.15.1",
     .dependencies = .{
         .fssimu2 = .{
-            .url = "https://github.com/gianni-rosato/fssimu2/archive/refs/heads/main.tar.gz",
-            .hash = "fssimu2-0.1.1-83U3DZsZAQCpNPwejysv0XpJlhSOVUp7ahoEnZFecKvV",
+            .url = "https://github.com/gianni-rosato/fssimu2/archive/refs/tags/0.1.1.tar.gz",
+            .hash = "fssimu2-0.1.1-83U3DbAfAQCjWYwf2KSHecW4lDAAAO62RbD5xzYCtK1m",
         },
     },
     .paths = .{
