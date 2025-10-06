@@ -16,6 +16,7 @@ const ARG_TILE_ROWS_LOG2: [:0]const u8 = "--tile-rows-log2";
 const ARG_TILE_COLS_LOG2: [:0]const u8 = "--tile-cols-log2";
 const ARG_AUTO_TILING: [:0]const u8 = "--auto-tiling";
 const ARG_TARGET_SCORE: [:0]const u8 = "--target";
+const ARG_TENBIT: [:0]const u8 = "--tenbit";
 
 pub const AvifEncOptions = struct {
     quality: i32 = 60,
@@ -25,8 +26,8 @@ pub const AvifEncOptions = struct {
     tile_rows_log2: i32 = 0,
     tile_cols_log2: i32 = 0,
     auto_tiling: bool = true,
-    scaling_mode: ?struct { horizontal: u32, vertical: u32 } = null,
     target_score: f64 = 80.0,
+    tenbit: bool = true,
 
     pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) void {
         encoder.quality = options.quality;
@@ -119,6 +120,8 @@ pub fn parseArgs(args: [][:0]u8, input_file: *?[]const u8, output_file: *?[]cons
             options.auto_tiling = try boolCliArg(&arg_idx, args, ARG_AUTO_TILING);
         } else if (std.mem.eql(u8, arg, ARG_TARGET_SCORE)) {
             options.target_score = try floatCliArg(&arg_idx, args, 0.0, 100.0, ARG_TARGET_SCORE);
+        } else if (std.mem.eql(u8, arg, ARG_TENBIT)) {
+            options.tenbit = try boolCliArg(&arg_idx, args, ARG_TENBIT);
         } else if (input_file.* == null) {
             input_file.* = arg;
         } else if (output_file.* == null) {

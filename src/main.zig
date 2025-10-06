@@ -13,6 +13,7 @@ const c = @cImport({
 const VERSION = @import("build_opts").version;
 
 fn findTargetQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, target: f64, enc_options: a.AvifEncOptions) !u32 {
+    // TODO: predict initial nedded quality with formula
     var low: u32 = 0;
     var high: u32 = 100;
 
@@ -37,7 +38,8 @@ fn computeScoreAtQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, widt
 }
 
 fn encodeAvifToBuffer(allocator: std.mem.Allocator, rgb: []const u8, width: u32, height: u32, quality: u32, enc_options: a.AvifEncOptions, output: *std.ArrayListAligned(u8, null)) !void {
-    const image = c.avifImageCreate(width, height, 8, c.AVIF_PIXEL_FORMAT_YUV444);
+    const depth: u32 = if (enc_options.tenbit) 10 else 8;
+    const image = c.avifImageCreate(width, height, depth, c.AVIF_PIXEL_FORMAT_YUV444);
     if (image == null) return error.OutOfMemory;
     defer c.avifImageDestroy(image);
 
@@ -200,11 +202,12 @@ pub fn main() !void {
 
     // Find the minimal quality that achieves >= target_score
     // Use default encoder options for quality finding
-    const default_enc_options = a.AvifEncOptions{};
-    const quality = try findTargetQuality(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), target_score, default_enc_options);
+    // TODO: Maybe use faster speed for quality finding?
+    const quality = try findTargetQuality(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), target_score, enc_options);
 
     // Encode with that quality
     try encodeAvif(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), quality, enc_options, output_path);
 
+    // TODO: Print final score
     print("Encoded AVIF with quality {}\n", .{quality});
 }
