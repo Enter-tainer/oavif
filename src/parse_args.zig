@@ -119,7 +119,7 @@ pub fn parseArgs(args: [][:0]u8, input_file: *?[]const u8, output_file: *?[]cons
         } else if (std.mem.eql(u8, arg, ARG_AUTO_TILING)) {
             options.auto_tiling = try boolCliArg(&arg_idx, args, ARG_AUTO_TILING);
         } else if (std.mem.eql(u8, arg, ARG_TARGET_SCORE)) {
-            options.target_score = try floatCliArg(&arg_idx, args, 0.0, 100.0, ARG_TARGET_SCORE);
+            options.target_score = try floatCliArg(&arg_idx, args, 30.0, 100.0, ARG_TARGET_SCORE);
         } else if (std.mem.eql(u8, arg, ARG_TENBIT)) {
             options.tenbit = try boolCliArg(&arg_idx, args, ARG_TENBIT);
         } else if (input_file.* == null) {

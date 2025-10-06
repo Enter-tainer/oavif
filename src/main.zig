@@ -12,10 +12,27 @@ const c = @cImport({
 
 const VERSION = @import("build_opts").version;
 
+inline fn predictInitialQ(tgt: f64) u32 {
+    // Use quadratic formula to predict Q from target SSIMULACRA2
+    // SSIMULACRA2 = -6.87 + 2.36(Q) - 0.014(Q^2)
+    // Rearranging: -0.014*Q^2 + 2.36*Q + (-6.87 - target) = 0
+    // Q = (-b + sqrt(b^2 - 4ac)) / (2a)
+    const x = -0.014;
+    const y = 2.36;
+    const d = y * y - 4.0 * x * (-6.87 - tgt);
+    return @intFromFloat(@min(100.0, @round((-y + @sqrt(d)) / (2.0 * x))));
+}
+
 fn findTargetQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, target: f64, enc_options: a.AvifEncOptions) !u32 {
-    // TODO: predict initial nedded quality with formula
     var low: u32 = 0;
     var high: u32 = 100;
+
+    const initial_mid: u32 = predictInitialQ(target);
+    const initial_score = try computeScoreAtQuality(allocator, ref_rgb, width, height, initial_mid, enc_options);
+    if (initial_score >= target)
+        high = initial_mid
+    else
+        low = initial_mid + 1;
 
     while (low < high) {
         const mid = (low + high) / 2;
