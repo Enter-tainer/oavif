@@ -12,9 +12,7 @@ const c = @cImport({
 
 const VERSION = @import("build_opts").version;
 
-// TODO: We can probably interpolate between two Q's instead of
-// predicting an initial q + binary search
-inline fn predictInitialQ(tgt: f64) u32 {
+inline fn predictQFromScore(tgt: f64) u32 {
     // Use exponential formula to predict Q from target SSIMULACRA2
     // Q = 6.83 * e^(0.0282 * target)
     const q = 6.83 * @exp(0.0282 * tgt);
@@ -22,26 +20,71 @@ inline fn predictInitialQ(tgt: f64) u32 {
 }
 
 fn findTargetQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, target: f64, enc_options: a.AvifEncOptions) !u32 {
-    var low: u32 = 0;
-    var high: u32 = 100;
+    // Step 1: Predict initial Q and encode
+    const q1 = predictQFromScore(target);
+    const score1 = try computeScoreAtQuality(allocator, ref_rgb, width, height, q1, enc_options);
 
-    const initial_mid: u32 = predictInitialQ(target);
-    const initial_score = try computeScoreAtQuality(allocator, ref_rgb, width, height, initial_mid, enc_options);
-    if (initial_score >= target)
-        high = initial_mid
-    else
-        low = initial_mid + 1;
+    // If we hit the target exactly (or very close), we're done
+    if (@abs(score1 - target) < 1)
+        return q1;
 
-    while (low < high) {
-        const mid = (low + high) / 2;
-        const score = try computeScoreAtQuality(allocator, ref_rgb, width, height, mid, enc_options);
-        if (score >= target) high = mid else low = mid + 1;
+    // Step 2: Predict second Q based on undershoot/overshoot
+    const q2 = blk: {
+        if (score1 > target) {
+            // Overshot - try lower quality
+            // Adjust proportionally to how much we overshot
+            const overshoot_factor = (score1 - target) / target;
+            const adjustment: i32 = @intFromFloat(@max(1.0, @min(20.0, overshoot_factor * 30.0)));
+            break :blk @max(0, @as(i32, @intCast(q1)) - adjustment);
+        } else {
+            // Undershot - try higher quality
+            const undershoot_factor = (target - score1) / target;
+            const adjustment: i32 = @intFromFloat(@max(1.0, @min(20.0, undershoot_factor * 30.0)));
+            break :blk @min(100, @as(i32, @intCast(q1)) + adjustment);
+        }
+    };
+
+    // Ensure q2 is different from q1
+    const q2_clamped = if (q2 == q1) blk: {
+        break :blk if (score1 > target) @max(0, @as(i32, @intCast(q1)) - 1) else @min(100, q1 + 1);
+    } else q2;
+
+    const score2 = try computeScoreAtQuality(allocator, ref_rgb, width, height, @intCast(q2_clamped), enc_options);
+
+    // Step 3: Linear interpolation between q1 and q2 to find optimal Q
+    // If both scores are on the same side of target, use the closer one
+    if ((score1 >= target and score2 >= target) or (score1 < target and score2 < target)) {
+        const diff1 = @abs(score1 - target);
+        const diff2 = @abs(score2 - target);
+        return if (diff1 < diff2) q1 else @intCast(q2_clamped);
     }
 
-    return low;
+    // Linear interpolation: q = q1 + (q2 - q1) * ((target - score1) / (score2 - score1))
+    const score_diff = score2 - score1;
+    if (@abs(score_diff) < 0.1)
+        return if (score1 >= target) q1 else @intCast(q2_clamped);
+
+    const t = (target - score1) / score_diff;
+    const q_interpolated = @as(f64, @floatFromInt(q1)) + (@as(f64, @floatFromInt(q2_clamped)) - @as(f64, @floatFromInt(q1))) * t;
+    const q_final: u32 = @intFromFloat(@round(@max(0.0, @min(100.0, q_interpolated))));
+    // Ensure we meet or exceed the target
+    const final_score = try computeScoreAtQuality(allocator, ref_rgb, width, height, q_final, enc_options);
+    if (final_score >= target) {
+        return q_final;
+    } else {
+        // If interpolation undershot, increment until we meet target
+        var q_adjusted = q_final;
+        while (q_adjusted < 100) : (q_adjusted += 1) {
+            const adjusted_score = try computeScoreAtQuality(allocator, ref_rgb, width, height, q_adjusted, enc_options);
+            if (adjusted_score >= target)
+                return q_adjusted;
+        }
+        return 100;
+    }
 }
 
 fn computeScoreAtQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, quality: u32, enc_options: a.AvifEncOptions) !f64 {
+    print("encoding AVIF\n", .{});
     var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
     defer avif_data.deinit(allocator);
     try encodeAvifToBuffer(allocator, ref_rgb, width, height, quality, enc_options, &avif_data);
