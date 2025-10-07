@@ -12,6 +12,8 @@ const c = @cImport({
 
 const VERSION = @import("build_opts").version;
 
+// TODO: We can probably interpolate between two Q's instead of
+// predicting an initial q + binary search
 inline fn predictInitialQ(tgt: f64) u32 {
     // Use exponential formula to predict Q from target SSIMULACRA2
     // Q = 6.83 * e^(0.0282 * target)

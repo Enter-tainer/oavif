@@ -17,17 +17,40 @@ const ARG_TILE_COLS_LOG2: [:0]const u8 = "--tile-cols-log2";
 const ARG_AUTO_TILING: [:0]const u8 = "--auto-tiling";
 const ARG_TARGET_SCORE: [:0]const u8 = "--target";
 const ARG_TENBIT: [:0]const u8 = "--tenbit";
+const ARG_TUNE: [:0]const u8 = "--tune";
+
+pub const TuneMode = enum {
+    ssim,
+    iq,
+    ssimulacra2,
+
+    pub fn toString(self: TuneMode) [:0]const u8 {
+        return switch (self) {
+            .ssim => "ssim",
+            .iq => "iq",
+            .ssimulacra2 => "ssimulacra2",
+        };
+    }
+
+    pub fn fromString(s: []const u8) !TuneMode {
+        if (std.mem.eql(u8, s, "ssim")) return .ssim;
+        if (std.mem.eql(u8, s, "iq")) return .iq;
+        if (std.mem.eql(u8, s, "ssimulacra2")) return .ssimulacra2;
+        return error.InvalidTuneMode;
+    }
+};
 
 pub const AvifEncOptions = struct {
     quality: i32 = 60,
-    quality_alpha: i32 = 100, // AVIF_QUALITY_LOSSLESS
-    speed: i32 = 6, // AVIF_SPEED_DEFAULT
+    quality_alpha: i32 = @intCast(c.AVIF_QUALITY_LOSSLESS),
+    speed: i32 = 9,
     max_threads: i32 = 1,
     tile_rows_log2: i32 = 0,
     tile_cols_log2: i32 = 0,
     auto_tiling: bool = true,
     target_score: f64 = 80.0,
     tenbit: bool = false,
+    tune: TuneMode = .iq,
 
     pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) void {
         encoder.quality = options.quality;
@@ -37,6 +60,7 @@ pub const AvifEncOptions = struct {
         encoder.tileRowsLog2 = options.tile_rows_log2;
         encoder.tileColsLog2 = options.tile_cols_log2;
         encoder.autoTiling = if (options.auto_tiling) c.AVIF_TRUE else c.AVIF_FALSE;
+        _ = c.avifEncoderSetCodecSpecificOption(encoder, "tune", options.tune.toString());
     }
 };
 
@@ -68,20 +92,6 @@ fn floatCliArg(arg_idx: *usize, args: [][:0]u8, min: f64, max: f64, arg: [:0]con
     return tmp;
 }
 
-fn uintCliArg(arg_idx: *usize, args: [][:0]u8, min: u64, max: u64, arg: [:0]const u8) !u64 {
-    if (arg_idx.* >= args.len or args[arg_idx.*][0] == '-') {
-        print("Error: Missing {s} value\n", .{arg});
-        return error.MissingOptionValue;
-    }
-    const tmp: u64 = try std.fmt.parseInt(u64, args[arg_idx.*], 10);
-    if (tmp < min or tmp > max) {
-        print("Error: {s} must be between {d} and {d}\n", .{ arg, min, max });
-        return error.InvalidOptionValue;
-    }
-    arg_idx.* += 1;
-    return tmp;
-}
-
 fn boolCliArg(arg_idx: *usize, args: [][:0]u8, arg: [:0]const u8) !bool {
     if (arg_idx.* >= args.len or args[arg_idx.*][0] == '-') {
         print("Error: Missing {s} value\n", .{arg});
@@ -94,6 +104,19 @@ fn boolCliArg(arg_idx: *usize, args: [][:0]u8, arg: [:0]const u8) !bool {
     }
     arg_idx.* += 1;
     return tmp == 1;
+}
+
+fn tuneCliArg(arg_idx: *usize, args: [][:0]u8, arg: [:0]const u8) !TuneMode {
+    if (arg_idx.* >= args.len or args[arg_idx.*][0] == '-') {
+        print("Error: Missing {s} value\n", .{arg});
+        return error.MissingOptionValue;
+    }
+    const tune_mode = TuneMode.fromString(args[arg_idx.*]) catch {
+        print("Error: {s} must be one of: ssim, iq, ssimulacra2\n", .{arg});
+        return error.InvalidOptionValue;
+    };
+    arg_idx.* += 1;
+    return tune_mode;
 }
 
 pub fn parseArgs(args: [][:0]u8, input_file: *?[]const u8, output_file: *?[]const u8) !AvifEncOptions {
@@ -122,6 +145,8 @@ pub fn parseArgs(args: [][:0]u8, input_file: *?[]const u8, output_file: *?[]cons
             options.target_score = try floatCliArg(&arg_idx, args, 30.0, 100.0, ARG_TARGET_SCORE);
         } else if (std.mem.eql(u8, arg, ARG_TENBIT)) {
             options.tenbit = try boolCliArg(&arg_idx, args, ARG_TENBIT);
+        } else if (std.mem.eql(u8, arg, ARG_TUNE)) {
+            options.tune = try tuneCliArg(&arg_idx, args, ARG_TUNE);
         } else if (input_file.* == null) {
             input_file.* = arg;
         } else if (output_file.* == null) {
@@ -161,6 +186,8 @@ pub fn printUsage() void {
         \\    tile columns log2 (0..6) [0]
         \\ --auto-tiling 0/1
         \\    enable automatic tiling [0]
+        \\ --tune MODE
+        \\    libaom tuning mode (ssim, iq, ssimulacra2) [iq]
     , .{});
     print("\n\n\x1b[37mInput image formats: PNG, PAM, JPEG, WebP, or AVIF\x1b[0m\n", .{});
 }
