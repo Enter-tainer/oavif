@@ -27,7 +27,7 @@ pub const AvifEncOptions = struct {
     tile_cols_log2: i32 = 0,
     auto_tiling: bool = true,
     target_score: f64 = 80.0,
-    tenbit: bool = true,
+    tenbit: bool = false,
 
     pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) void {
         encoder.quality = options.quality;

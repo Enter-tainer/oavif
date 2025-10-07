@@ -13,14 +13,10 @@ const c = @cImport({
 const VERSION = @import("build_opts").version;
 
 inline fn predictInitialQ(tgt: f64) u32 {
-    // Use quadratic formula to predict Q from target SSIMULACRA2
-    // SSIMULACRA2 = -6.87 + 2.36(Q) - 0.014(Q^2)
-    // Rearranging: -0.014*Q^2 + 2.36*Q + (-6.87 - target) = 0
-    // Q = (-b + sqrt(b^2 - 4ac)) / (2a)
-    const x = -0.014;
-    const y = 2.36;
-    const d = y * y - 4.0 * x * (-6.87 - tgt);
-    return @intFromFloat(@min(100.0, @round((-y + @sqrt(d)) / (2.0 * x))));
+    // Use exponential formula to predict Q from target SSIMULACRA2
+    // Q = 6.83 * e^(0.0282 * target)
+    const q = 6.83 * @exp(0.0282 * tgt);
+    return @intFromFloat(@min(100.0, @round(q)));
 }
 
 fn findTargetQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, target: f64, enc_options: a.AvifEncOptions) !u32 {
