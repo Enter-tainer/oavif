@@ -2,6 +2,7 @@ const std = @import("std");
 const fssimu2 = @import("fssimu2");
 const io = @import("io.zig");
 const a = @import("parse_args.zig");
+const tq = @import("tq.zig");
 const print = std.debug.print;
 const c = @cImport({
     @cInclude("stdio.h");
@@ -12,79 +13,7 @@ const c = @cImport({
 
 const VERSION = @import("build_opts").version;
 
-inline fn predictQFromScore(tgt: f64) u32 {
-    // Use exponential formula to predict Q from target SSIMULACRA2
-    // Q = 6.83 * e^(0.0282 * target)
-    const q = 6.83 * @exp(0.0282 * tgt);
-    return @intFromFloat(@min(100.0, @round(q)));
-}
-
-fn findTargetQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, target: f64, enc_options: a.AvifEncOptions) !u32 {
-    // Step 1: Predict initial Q and encode
-    const q1 = predictQFromScore(target);
-    const score1 = try computeScoreAtQuality(allocator, ref_rgb, width, height, q1, enc_options);
-
-    // If we hit the target exactly (or very close), we're done
-    if (@abs(score1 - target) < 1)
-        return q1;
-
-    // Step 2: Predict second Q based on undershoot/overshoot
-    const q2 = blk: {
-        if (score1 > target) {
-            // Overshot - try lower quality
-            // Adjust proportionally to how much we overshot
-            const overshoot_factor = (score1 - target) / target;
-            const adjustment: i32 = @intFromFloat(@max(1.0, @min(20.0, overshoot_factor * 30.0)));
-            break :blk @max(0, @as(i32, @intCast(q1)) - adjustment);
-        } else {
-            // Undershot - try higher quality
-            const undershoot_factor = (target - score1) / target;
-            const adjustment: i32 = @intFromFloat(@max(1.0, @min(20.0, undershoot_factor * 30.0)));
-            break :blk @min(100, @as(i32, @intCast(q1)) + adjustment);
-        }
-    };
-
-    // Ensure q2 is different from q1
-    const q2_clamped = if (q2 == q1) blk: {
-        break :blk if (score1 > target) @max(0, @as(i32, @intCast(q1)) - 1) else @min(100, q1 + 1);
-    } else q2;
-
-    const score2 = try computeScoreAtQuality(allocator, ref_rgb, width, height, @intCast(q2_clamped), enc_options);
-
-    // Step 3: Linear interpolation between q1 and q2 to find optimal Q
-    // If both scores are on the same side of target, use the closer one
-    if ((score1 >= target and score2 >= target) or (score1 < target and score2 < target)) {
-        const diff1 = @abs(score1 - target);
-        const diff2 = @abs(score2 - target);
-        return if (diff1 < diff2) q1 else @intCast(q2_clamped);
-    }
-
-    // Linear interpolation: q = q1 + (q2 - q1) * ((target - score1) / (score2 - score1))
-    const score_diff = score2 - score1;
-    if (@abs(score_diff) < 0.1)
-        return if (score1 >= target) q1 else @intCast(q2_clamped);
-
-    const t = (target - score1) / score_diff;
-    const q_interpolated = @as(f64, @floatFromInt(q1)) + (@as(f64, @floatFromInt(q2_clamped)) - @as(f64, @floatFromInt(q1))) * t;
-    const q_final: u32 = @intFromFloat(@round(@max(0.0, @min(100.0, q_interpolated))));
-    // Ensure we meet or exceed the target
-    const final_score = try computeScoreAtQuality(allocator, ref_rgb, width, height, q_final, enc_options);
-    if (final_score >= target) {
-        return q_final;
-    } else {
-        // If interpolation undershot, increment until we meet target
-        var q_adjusted = q_final;
-        while (q_adjusted < 100) : (q_adjusted += 1) {
-            const adjusted_score = try computeScoreAtQuality(allocator, ref_rgb, width, height, q_adjusted, enc_options);
-            if (adjusted_score >= target)
-                return q_adjusted;
-        }
-        return 100;
-    }
-}
-
-fn computeScoreAtQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, quality: u32, enc_options: a.AvifEncOptions) !f64 {
-    print("encoding AVIF\n", .{});
+pub fn computeScoreAtQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, quality: u32, enc_options: a.AvifEncOptions) !f64 {
     var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
     defer avif_data.deinit(allocator);
     try encodeAvifToBuffer(allocator, ref_rgb, width, height, quality, enc_options, &avif_data);
@@ -258,14 +187,30 @@ pub fn main() !void {
     const ref_rgb = if (ref_image.channels == 3) ref_image.data else try io.toRGB8(allocator, ref_image);
     defer if (ref_image.channels != 3) allocator.free(ref_rgb);
 
+    print("Target SSIMULACRA2 score: {d:.2}\n", .{target_score});
+    print("Starting probe-based quality search...\n\n", .{});
+
     // Find the minimal quality that achieves >= target_score
-    // Use default encoder options for quality finding
-    // TODO: Maybe use faster speed for quality finding?
-    const quality = try findTargetQuality(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), target_score, enc_options);
+    const quality = try tq.findTargetQuality(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), target_score, enc_options);
+
+    print("\nEncoding final output with quality {}...\n", .{quality});
 
     // Encode with that quality
     try encodeAvif(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), quality, enc_options, output_path);
 
-    // TODO: Print final score
-    print("Encoded AVIF with quality {}\n", .{quality});
+    // Compute final score for verification
+    var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
+    defer avif_data.deinit(allocator);
+    try encodeAvifToBuffer(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), quality, enc_options, &avif_data);
+
+    const decoded_rgb = try decodeAvifToRgb(allocator, avif_data.items);
+    defer allocator.free(decoded_rgb);
+
+    print("\nFinal output:\n", .{});
+    print("  Quality: {}\n", .{quality});
+    // TODO: EncCtx struct for final stats, etc
+    // Remove all debug prints, add a debug flag that prints
+    // all of the EncCtx stats
+    // print("  SSIMULACRA2: {d:.2}\n", .{final_score});
+    print("  Size: {} bytes\n", .{avif_data.items.len});
 }
