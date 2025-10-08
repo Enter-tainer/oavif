@@ -19,6 +19,29 @@ pub const Image = struct {
     }
 };
 
+pub fn loadImage(allocator: std.mem.Allocator, path: []const u8) !Image {
+    if (hasExtension(path, ".png"))
+        return loadPNG(allocator, path)
+    else if (hasExtension(path, ".pam"))
+        return loadPAM(allocator, path)
+    else if (hasExtension(path, ".jpg") or hasExtension(path, ".jpeg"))
+        return loadJPEG(allocator, path)
+    else if (hasExtension(path, ".webp"))
+        return loadWebP(allocator, path)
+    else if (hasExtension(path, ".avif"))
+        return loadAVIF(allocator, path)
+    else {
+        print("Error: Unrecognized image format; fssimu2 supports PNG, PAM, JPG, WEBP, or AVIF\n", .{});
+        return error.UnrecognizedImageFormat;
+    }
+}
+
+fn hasExtension(path: []const u8, ext: []const u8) bool {
+    if (path.len < ext.len) return false;
+    const tail = path[path.len - ext.len ..];
+    return std.ascii.eqlIgnoreCase(tail, ext);
+}
+
 pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
     const file = try std.fs.cwd().openFile(path, .{});
 
@@ -310,29 +333,6 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = @intCast(channels),
         .data = out_buf,
     };
-}
-
-pub fn loadImage(allocator: std.mem.Allocator, path: []const u8) !Image {
-    if (hasExtension(path, ".png"))
-        return loadPNG(allocator, path)
-    else if (hasExtension(path, ".pam"))
-        return loadPAM(allocator, path)
-    else if (hasExtension(path, ".jpg") or hasExtension(path, ".jpeg"))
-        return loadJPEG(allocator, path)
-    else if (hasExtension(path, ".webp"))
-        return loadWebP(allocator, path)
-    else if (hasExtension(path, ".avif"))
-        return loadAVIF(allocator, path)
-    else {
-        print("Error: Unrecognized image format; fssimu2 supports PNG, PAM, JPG, WEBP, or AVIF\n", .{});
-        return error.UnrecognizedImageFormat;
-    }
-}
-
-fn hasExtension(path: []const u8, ext: []const u8) bool {
-    if (path.len < ext.len) return false;
-    const tail = path[path.len - ext.len ..];
-    return std.ascii.eqlIgnoreCase(tail, ext);
 }
 
 pub fn toRGB8(allocator: std.mem.Allocator, img: Image) ![]u8 {

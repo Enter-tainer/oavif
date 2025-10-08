@@ -8,8 +8,7 @@ pub const TQCtx = struct {
     max_pass: usize = 6,
     num_pass: usize = 0,
     tolerance: f64 = 1.0,
-    q_final: u32 = 0,
-    score_final: f64 = 0,
+    score: f64 = 0.0,
 };
 
 const PassResult = struct {
@@ -106,9 +105,6 @@ fn interpolateQuantizer(
 pub fn findTargetQuality(
     e: *EncCtx,
     allocator: std.mem.Allocator,
-    ref_rgb: []const u8,
-    width: u32,
-    height: u32,
 ) !void {
     // TODO: these should be parameters
     const tolerance: f64 = 1.0;
@@ -121,37 +117,37 @@ pub fn findTargetQuality(
 
     for (0..e.t.max_pass) |pass| {
         e.t.num_pass = pass;
-        const q_cur = if (pass == 0)
+        e.q = if (pass == 0)
             predictQFromScore(e.o.score_tgt)
         else
             try interpolateQuantizer(allocator, lo_bound, hi_bound, history.items, e.o.score_tgt);
 
-        print("Probe {}/{}: Q={} (range: {}-{})\n", .{ pass + 1, e.t.max_pass, q_cur, lo_bound, hi_bound });
+        print("Probe {}/{}: Q={} (range: {}-{})\n", .{ pass + 1, e.t.max_pass, e.q, lo_bound, hi_bound });
 
         if (blk: {
             for (history.items) |h|
-                if (h.quality == q_cur)
+                if (h.quality == e.q)
                     break :blk true;
             break :blk false;
         }) {
-            print("Quality {} already probed, stopping\n", .{q_cur});
+            print("Quality {} already probed, stopping\n", .{e.q});
             break;
         }
 
-        const score = try computeScoreAtQuality(e, q_cur, allocator, ref_rgb, width, height);
-        print("  Score: {d:.2}\n", .{score});
+        e.t.score = try computeScoreAtQuality(e, allocator);
+        print("  Score: {d:.2}\n", .{e.t.score});
 
-        try history.append(allocator, PassResult{ .quality = q_cur, .score = score });
+        try history.append(allocator, PassResult{ .quality = e.q, .score = e.t.score });
 
-        const abs_err = @abs(score - e.o.score_tgt);
+        const abs_err = @abs(e.t.score - e.o.score_tgt);
         if (pass == 0) {
             const err_bound: u32 = @intFromFloat(@ceil(abs_err) * 4.0);
-            if (score - e.o.score_tgt > 0) {
-                hi_bound = q_cur;
-                lo_bound = if (q_cur > err_bound) q_cur - err_bound else 0;
+            if (e.t.score - e.o.score_tgt > 0) {
+                hi_bound = e.q;
+                lo_bound = if (e.q > err_bound) e.q - err_bound else 0;
             } else {
-                lo_bound = q_cur;
-                hi_bound = @min(100, q_cur + err_bound);
+                lo_bound = e.q;
+                hi_bound = @min(100, e.q + err_bound);
             }
 
             print("  Bounding search based on error: range now {}-{}\n", .{ lo_bound, hi_bound });
@@ -159,16 +155,14 @@ pub fn findTargetQuality(
 
         if (abs_err < tolerance) {
             print("Target reached within tolerance\n", .{});
-            e.t.q_final = q_cur;
-            e.t.score_final = score;
             return;
         }
 
         if (pass > 0) {
-            if (score > e.o.score_tgt)
-                hi_bound = q_cur
+            if (e.t.score > e.o.score_tgt)
+                hi_bound = e.q
             else
-                lo_bound = q_cur;
+                lo_bound = e.q;
         }
 
         if (lo_bound >= hi_bound - 1) {
@@ -189,8 +183,8 @@ pub fn findTargetQuality(
     }
     if (best_q) |q| {
         print("Best quality: {} (score: {d:.2})\n", .{ q, best_score });
-        e.t.q_final = q;
-        e.t.score_final = best_score;
+        e.q = q;
+        e.t.score = best_score;
         return;
     }
 
@@ -202,8 +196,8 @@ pub fn findTargetQuality(
             highest_q = h.quality;
         };
 
-    e.t.q_final = highest_q;
-    e.t.score_final = highest_score;
+    e.q = highest_q;
+    e.t.score = highest_score;
     print("No pass met target, returning highest scoring quality: {} (score: {d:.2})\n", .{ highest_q, highest_score });
     return;
 }
