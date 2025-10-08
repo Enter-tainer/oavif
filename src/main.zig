@@ -13,10 +13,15 @@ const c = @cImport({
 
 const VERSION = @import("build_opts").version;
 
-pub fn computeScoreAtQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32, quality: u32, enc_options: a.AvifEncOptions) !f64 {
+pub const EncCtx = struct {
+    o: a.AvifEncOptions = a.AvifEncOptions{},
+    t: tq.TQCtx = tq.TQCtx{},
+};
+
+pub fn computeScoreAtQuality(e: *EncCtx, q: u32, allocator: std.mem.Allocator, ref_rgb: []const u8, width: u32, height: u32) !f64 {
     var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
     defer avif_data.deinit(allocator);
-    try encodeAvifToBuffer(allocator, ref_rgb, width, height, quality, enc_options, &avif_data);
+    try encodeAvifToBuffer(e, q, allocator, ref_rgb, width, height, &avif_data);
 
     const decoded_rgb = try decodeAvifToRgb(allocator, avif_data.items);
     defer allocator.free(decoded_rgb);
@@ -24,8 +29,9 @@ pub fn computeScoreAtQuality(allocator: std.mem.Allocator, ref_rgb: []const u8, 
     return try fssimu2.computeSsimu2(allocator, ref_rgb, decoded_rgb, width, height, 3, null);
 }
 
-fn encodeAvifToBuffer(allocator: std.mem.Allocator, rgb: []const u8, width: u32, height: u32, quality: u32, enc_options: a.AvifEncOptions, output: *std.ArrayListAligned(u8, null)) !void {
-    const depth: u32 = if (enc_options.tenbit) 10 else 8;
+fn encodeAvifToBuffer(e: *EncCtx, q: u32, allocator: std.mem.Allocator, rgb: []const u8, width: u32, height: u32, output: *std.ArrayListAligned(u8, null)) !void {
+    const o: *a.AvifEncOptions = &e.o;
+    const depth: u32 = if (o.tenbit) 10 else 8;
     const image = c.avifImageCreate(width, height, depth, c.AVIF_PIXEL_FORMAT_YUV444);
     if (image == null) return error.OutOfMemory;
     defer c.avifImageDestroy(image);
@@ -45,10 +51,10 @@ fn encodeAvifToBuffer(allocator: std.mem.Allocator, rgb: []const u8, width: u32,
     defer c.avifEncoderDestroy(encoder);
 
     // Apply encoder options
-    enc_options.copyToEncoder(@ptrCast(encoder));
+    e.o.copyToEncoder(@ptrCast(encoder));
 
     // Override quality with the specific value for this encoding
-    encoder.*.quality = @intCast(quality);
+    encoder.*.quality = @intCast(q);
 
     var avif_output = c.avifRWData{ .data = null, .size = 0 };
     const add_result = c.avifEncoderAddImage(encoder, image, 1, c.AVIF_ADD_IMAGE_FLAG_SINGLE);
@@ -106,10 +112,10 @@ fn decodeAvifToRgb(allocator: std.mem.Allocator, avif_data: []const u8) ![]u8 {
     return out;
 }
 
-fn encodeAvif(allocator: std.mem.Allocator, rgb: []const u8, width: u32, height: u32, quality: u32, enc_options: a.AvifEncOptions, output_path: []const u8) !void {
+fn encodeAvif(e: *EncCtx, allocator: std.mem.Allocator, rgb: []const u8, width: u32, height: u32, output_path: []const u8) !void {
     var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
     defer avif_data.deinit(allocator);
-    try encodeAvifToBuffer(allocator, rgb, width, height, quality, enc_options, &avif_data);
+    try encodeAvifToBuffer(e, e.t.q_final, allocator, rgb, width, height, &avif_data);
 
     const file = try std.fs.cwd().createFile(output_path, .{});
     defer file.close();
@@ -166,21 +172,17 @@ pub fn main() !void {
     if (show_help) return a.printUsage();
     if (show_version) return printVersion();
 
+    var e: EncCtx = EncCtx{};
+    var o: *a.AvifEncOptions = &e.o;
+
     // Parse encoder-specific arguments
-    const enc_options = a.parseArgs(args, &input_file, &output_file) catch |err| {
-        print("Error parsing arguments: {}\n", .{err});
-        a.printUsage();
-        return err;
-    };
+    try o.parseArgs(args, &input_file, &output_file);
 
     if (input_file == null or output_file == null)
         return error.MissingInputOrOutput;
 
     const input_path = input_file.?;
     const output_path = output_file.?;
-
-    // Use target score from options (with default value of 80.0)
-    const target_score = enc_options.target_score;
 
     var ref_image = try io.loadImage(allocator, input_path);
     defer ref_image.deinit(allocator);
@@ -189,30 +191,31 @@ pub fn main() !void {
     const ref_rgb = if (ref_image.channels == 3) ref_image.data else try io.toRGB8(allocator, ref_image);
     defer if (ref_image.channels != 3) allocator.free(ref_rgb);
 
-    print("Target SSIMULACRA2 score: {d:.2}\n", .{target_score});
+    print("Target SSIMULACRA2 score: {d:.2}\n", .{e.o.score_tgt});
     print("Starting probe-based quality search...\n\n", .{});
 
     // Find the minimal quality that achieves near target_score
-    const quality = try tq.findTargetQuality(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), target_score, enc_options);
+    try tq.findTargetQuality(&e, allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height));
 
-    print("\nEncoding final output with quality {}...\n", .{quality});
+    print("\nEncoding final output with quality {}...\n", .{e.t.q_final});
 
     // Encode with that quality
-    try encodeAvif(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), quality, enc_options, output_path);
+    try encodeAvif(&e, allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), output_path);
 
     // Compute final score for verification
-    var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
-    defer avif_data.deinit(allocator);
-    try encodeAvifToBuffer(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), quality, enc_options, &avif_data);
+    // var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
+    // defer avif_data.deinit(allocator);
+    // try encodeAvifToBuffer(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), quality, e.o, &avif_data);
 
-    const decoded_rgb = try decodeAvifToRgb(allocator, avif_data.items);
-    defer allocator.free(decoded_rgb);
+    // TODO: Is this used at all?
+    // const decoded_rgb = try decodeAvifToRgb(allocator, avif_data.items);
+    // defer allocator.free(decoded_rgb);
 
     print("\nFinal output:\n", .{});
-    print("  Quality: {}\n", .{quality});
+    print("  Quality: {}\n", .{e.t.q_final});
     // TODO: EncCtx struct for final stats, etc
     // Remove all debug prints, add a debug flag that prints
     // all of the EncCtx stats
     // print("  SSIMULACRA2: {d:.2}\n", .{final_score});
-    print("  Size: {} bytes\n", .{avif_data.items.len});
+    // print("  Size: {} bytes\n", .{avif_data.items.len});
 }

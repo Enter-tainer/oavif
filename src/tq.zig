@@ -2,6 +2,15 @@ const std = @import("std");
 const a = @import("parse_args.zig");
 const print = std.debug.print;
 const computeScoreAtQuality = @import("main.zig").computeScoreAtQuality;
+const EncCtx = @import("main.zig").EncCtx;
+
+pub const TQCtx = struct {
+    max_pass: usize = 6,
+    num_pass: usize = 0,
+    tolerance: f64 = 1.0,
+    q_final: u32 = 0,
+    score_final: f64 = 0,
+};
 
 const PassResult = struct {
     quality: u32,
@@ -95,15 +104,13 @@ fn interpolateQuantizer(
 }
 
 pub fn findTargetQuality(
+    e: *EncCtx,
     allocator: std.mem.Allocator,
     ref_rgb: []const u8,
     width: u32,
     height: u32,
-    target: f64,
-    enc_options: a.AvifEncOptions,
-) !u32 {
+) !void {
     // TODO: these should be parameters
-    const passes: usize = 6;
     const tolerance: f64 = 1.0;
 
     var history = try std.ArrayList(PassResult).initCapacity(allocator, 0);
@@ -112,13 +119,14 @@ pub fn findTargetQuality(
     var lo_bound: u32 = 0;
     var hi_bound: u32 = 100;
 
-    for (0..passes) |pass| {
+    for (0..e.t.max_pass) |pass| {
+        e.t.num_pass = pass;
         const q_cur = if (pass == 0)
-            predictQFromScore(target)
+            predictQFromScore(e.o.score_tgt)
         else
-            try interpolateQuantizer(allocator, lo_bound, hi_bound, history.items, target);
+            try interpolateQuantizer(allocator, lo_bound, hi_bound, history.items, e.o.score_tgt);
 
-        print("Probe {}/{}: Q={} (range: {}-{})\n", .{ pass + 1, passes, q_cur, lo_bound, hi_bound });
+        print("Probe {}/{}: Q={} (range: {}-{})\n", .{ pass + 1, e.t.max_pass, q_cur, lo_bound, hi_bound });
 
         if (blk: {
             for (history.items) |h|
@@ -130,15 +138,15 @@ pub fn findTargetQuality(
             break;
         }
 
-        const score = try computeScoreAtQuality(allocator, ref_rgb, width, height, q_cur, enc_options);
+        const score = try computeScoreAtQuality(e, q_cur, allocator, ref_rgb, width, height);
         print("  Score: {d:.2}\n", .{score});
 
         try history.append(allocator, PassResult{ .quality = q_cur, .score = score });
 
-        const abs_err = @abs(score - target);
+        const abs_err = @abs(score - e.o.score_tgt);
         if (pass == 0) {
             const err_bound: u32 = @intFromFloat(@ceil(abs_err) * 4.0);
-            if (score - target > 0) {
+            if (score - e.o.score_tgt > 0) {
                 hi_bound = q_cur;
                 lo_bound = if (q_cur > err_bound) q_cur - err_bound else 0;
             } else {
@@ -151,11 +159,16 @@ pub fn findTargetQuality(
 
         if (abs_err < tolerance) {
             print("Target reached within tolerance\n", .{});
-            return q_cur;
+            e.t.q_final = q_cur;
+            e.t.score_final = score;
+            return;
         }
 
         if (pass > 0) {
-            if (score > target) hi_bound = q_cur else lo_bound = q_cur;
+            if (score > e.o.score_tgt)
+                hi_bound = q_cur
+            else
+                lo_bound = q_cur;
         }
 
         if (lo_bound >= hi_bound - 1) {
@@ -168,7 +181,7 @@ pub fn findTargetQuality(
     var best_score: f64 = 0;
 
     for (history.items) |h| {
-        if (h.score >= target)
+        if (h.score >= e.o.score_tgt)
             if (best_q == null or h.quality < best_q.?) {
                 best_q = h.quality;
                 best_score = h.score;
@@ -176,7 +189,9 @@ pub fn findTargetQuality(
     }
     if (best_q) |q| {
         print("Best quality: {} (score: {d:.2})\n", .{ q, best_score });
-        return q;
+        e.t.q_final = q;
+        e.t.score_final = best_score;
+        return;
     }
 
     var highest_score: f64 = 0;
@@ -187,6 +202,8 @@ pub fn findTargetQuality(
             highest_q = h.quality;
         };
 
+    e.t.q_final = highest_q;
+    e.t.score_final = highest_score;
     print("No pass met target, returning highest scoring quality: {} (score: {d:.2})\n", .{ highest_q, highest_score });
-    return highest_q;
+    return;
 }
