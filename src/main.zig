@@ -62,6 +62,8 @@ fn encodeAvifToBuffer(allocator: std.mem.Allocator, rgb: []const u8, width: u32,
     try output.appendSlice(allocator, @as([*]const u8, @ptrCast(avif_output.data))[0..avif_output.size]);
 }
 
+// TODO: Refactor to eliminate duplicate functionality with `loadAVIF()` in `io.zig`
+// TODO: Confirm we're using dav1d when possible
 fn decodeAvifToRgb(allocator: std.mem.Allocator, avif_data: []const u8) ![]u8 {
     const decoder = c.avifDecoderCreate();
     if (decoder == null) return error.OutOfMemory;
@@ -190,7 +192,7 @@ pub fn main() !void {
     print("Target SSIMULACRA2 score: {d:.2}\n", .{target_score});
     print("Starting probe-based quality search...\n\n", .{});
 
-    // Find the minimal quality that achieves >= target_score
+    // Find the minimal quality that achieves near target_score
     const quality = try tq.findTargetQuality(allocator, ref_rgb, @intCast(ref_image.width), @intCast(ref_image.height), target_score, enc_options);
 
     print("\nEncoding final output with quality {}...\n", .{quality});

@@ -3,7 +3,7 @@ const a = @import("parse_args.zig");
 const print = std.debug.print;
 const computeScoreAtQuality = @import("main.zig").computeScoreAtQuality;
 
-const ProbeResult = struct {
+const PassResult = struct {
     quality: u32,
     score: f64,
 };
@@ -45,28 +45,26 @@ inline fn quadraticInterpolate(scores: []const f64, qualities: []const f64, targ
 
 fn interpolateQuantizer(
     allocator: std.mem.Allocator,
-    lower_limit: u32,
-    upper_limit: u32,
-    history: []const ProbeResult,
+    lo_bound: u32,
+    hi_bound: u32,
+    history: []const PassResult,
     target: f64,
 ) !u32 {
-    const binary_search = @divFloor(lower_limit + upper_limit, 2);
+    const binary_search = @divFloor(lo_bound + hi_bound, 2);
 
     if (history.len == 0)
         return binary_search;
 
-    // Sort history by score
-    var sorted = try std.ArrayList(ProbeResult).initCapacity(allocator, history.len);
+    var sorted = try std.ArrayList(PassResult).initCapacity(allocator, history.len);
     defer sorted.deinit(allocator);
     try sorted.appendSlice(allocator, history);
 
-    std.mem.sort(ProbeResult, sorted.items, {}, struct {
-        fn lessThan(_: void, lhs: ProbeResult, rhs: ProbeResult) bool {
+    std.mem.sort(PassResult, sorted.items, {}, struct {
+        fn lessThan(_: void, lhs: PassResult, rhs: PassResult) bool {
             return lhs.score < rhs.score;
         }
     }.lessThan);
 
-    // Extract scores and qualities
     var scores = try std.ArrayList(f64).initCapacity(allocator, 0);
     defer scores.deinit(allocator);
     var qualities = try std.ArrayList(f64).initCapacity(allocator, 0);
@@ -77,36 +75,25 @@ fn interpolateQuantizer(
         try qualities.append(allocator, @floatFromInt(item.quality));
     }
 
-    const predicted = switch (history.len) {
+    const pred = switch (history.len) {
         1 => binary_search,
         2 => blk: {
-            // Linear interpolation for 3rd probe
-            const result = linearInterpolate(scores.items, qualities.items, target);
-            if (result) |r| {
-                break :blk @as(u32, @intFromFloat(@max(0.0, @min(100.0, @round(r)))));
-            }
+            if (linearInterpolate(scores.items, qualities.items, target)) |r|
+                break :blk @as(u32, @intFromFloat(std.math.clamp(@round(r), 0, 100)));
             break :blk binary_search;
         },
         else => blk: {
-            // Quadratic interpolation for 4+ probes
-            const result = quadraticInterpolate(scores.items, qualities.items, target);
-            if (result) |r| {
-                break :blk @as(u32, @intFromFloat(@max(0.0, @min(100.0, @round(r)))));
-            }
-            // Fallback to linear if quadratic fails
-            const linear_result = linearInterpolate(scores.items, qualities.items, target);
-            if (linear_result) |lr| {
-                break :blk @as(u32, @intFromFloat(@max(0.0, @min(100.0, @round(lr)))));
-            }
+            if (quadraticInterpolate(scores.items, qualities.items, target)) |r|
+                break :blk @as(u32, @intFromFloat(std.math.clamp(@round(r), 0, 100)));
+            if (linearInterpolate(scores.items, qualities.items, target)) |lr|
+                break :blk @as(u32, @intFromFloat(std.math.clamp(@round(lr), 0, 100)));
             break :blk binary_search;
         },
     };
 
-    return std.math.clamp(predicted, lower_limit, upper_limit);
+    return std.math.clamp(pred, lo_bound, hi_bound);
 }
 
-// TODO: If we're within a certain margin of the target, limit maximum step size
-// to increase odds of landing on the target
 pub fn findTargetQuality(
     allocator: std.mem.Allocator,
     ref_rgb: []const u8,
@@ -115,95 +102,91 @@ pub fn findTargetQuality(
     target: f64,
     enc_options: a.AvifEncOptions,
 ) !u32 {
-    const max_probes: usize = 6; // Av1an default
-    const tolerance: f64 = 0.5; // Target tolerance
+    // TODO: these should be parameters
+    const passes: usize = 6;
+    const tolerance: f64 = 1.0;
 
-    var history = try std.ArrayList(ProbeResult).initCapacity(allocator, 0);
+    var history = try std.ArrayList(PassResult).initCapacity(allocator, 0);
     defer history.deinit(allocator);
 
-    var lower_limit: u32 = 0;
-    var upper_limit: u32 = 100;
+    var lo_bound: u32 = 0;
+    var hi_bound: u32 = 100;
 
-    var probe_count: usize = 0;
-    while (probe_count < max_probes) : (probe_count += 1) {
-        // Predict next quality to probe
-        const next_q = if (probe_count == 0)
+    for (0..passes) |pass| {
+        const q_cur = if (pass == 0)
             predictQFromScore(target)
         else
-            try interpolateQuantizer(allocator, lower_limit, upper_limit, history.items, target);
+            try interpolateQuantizer(allocator, lo_bound, hi_bound, history.items, target);
 
-        print("Probe {}/{}: Q={} (range: {}-{})\n", .{ probe_count + 1, max_probes, next_q, lower_limit, upper_limit });
+        print("Probe {}/{}: Q={} (range: {}-{})\n", .{ pass + 1, passes, q_cur, lo_bound, hi_bound });
 
-        // Check if we already probed this quality
-        var already_probed = false;
-        for (history.items) |h| {
-            if (h.quality == next_q) {
-                already_probed = true;
-                break;
-            }
-        }
-
-        if (already_probed) {
-            print("Quality {} already probed, stopping\n", .{next_q});
+        if (blk: {
+            for (history.items) |h|
+                if (h.quality == q_cur)
+                    break :blk true;
+            break :blk false;
+        }) {
+            print("Quality {} already probed, stopping\n", .{q_cur});
             break;
         }
 
-        // Perform the probe
-        const score = try computeScoreAtQuality(allocator, ref_rgb, width, height, next_q, enc_options);
+        const score = try computeScoreAtQuality(allocator, ref_rgb, width, height, q_cur, enc_options);
         print("  Score: {d:.2}\n", .{score});
 
-        try history.append(allocator, ProbeResult{ .quality = next_q, .score = score });
+        try history.append(allocator, PassResult{ .quality = q_cur, .score = score });
 
-        // Check if we're within tolerance
-        if (@abs(score - target) < tolerance) {
+        const abs_err = @abs(score - target);
+        if (pass == 0) {
+            const err_bound: u32 = @intFromFloat(@ceil(abs_err) * 4.0);
+            if (score - target > 0) {
+                hi_bound = q_cur;
+                lo_bound = if (q_cur > err_bound) q_cur - err_bound else 0;
+            } else {
+                lo_bound = q_cur;
+                hi_bound = @min(100, q_cur + err_bound);
+            }
+
+            print("  Bounding search based on error: range now {}-{}\n", .{ lo_bound, hi_bound });
+        }
+
+        if (abs_err < tolerance) {
             print("Target reached within tolerance\n", .{});
-            return next_q;
+            return q_cur;
         }
 
-        // Narrow the search range
-        if (score > target) {
-            // Score too high, need lower quality (lower Q for AVIF)
-            upper_limit = next_q;
-        } else {
-            // Score too low, need higher quality (higher Q for AVIF)
-            lower_limit = next_q;
+        if (pass > 0) {
+            if (score > target) hi_bound = q_cur else lo_bound = q_cur;
         }
 
-        // Check if range collapsed
-        if (lower_limit >= upper_limit - 1) {
+        if (lo_bound >= hi_bound - 1) {
             print("Search range collapsed\n", .{});
             break;
         }
     }
 
-    // Find the best quality from history that meets or exceeds target
     var best_q: ?u32 = null;
     var best_score: f64 = 0;
 
     for (history.items) |h| {
-        if (h.score >= target) {
+        if (h.score >= target)
             if (best_q == null or h.quality < best_q.?) {
                 best_q = h.quality;
                 best_score = h.score;
-            }
-        }
+            };
     }
-
     if (best_q) |q| {
         print("Best quality: {} (score: {d:.2})\n", .{ q, best_score });
         return q;
     }
 
-    // If no probe met the target, return the highest quality probe
     var highest_score: f64 = 0;
     var highest_q: u32 = 0;
-    for (history.items) |h| {
+    for (history.items) |h|
         if (h.score > highest_score) {
             highest_score = h.score;
             highest_q = h.quality;
-        }
-    }
+        };
 
-    print("No probe met target, returning highest scoring quality: {} (score: {d:.2})\n", .{ highest_q, highest_score });
+    print("No pass met target, returning highest scoring quality: {} (score: {d:.2})\n", .{ highest_q, highest_score });
     return highest_q;
 }
