@@ -1,18 +1,15 @@
 const std = @import("std");
-const a = @import("parse_args.zig");
 const print = std.debug.print;
 const computeScoreAtQuality = @import("main.zig").computeScoreAtQuality;
 const EncCtx = @import("main.zig").EncCtx;
 
 pub const TQCtx = struct {
-    max_pass: usize = 6,
     num_pass: usize = 0,
-    tolerance: f64 = 1.0,
     score: f64 = 0.0,
 };
 
 const PassResult = struct {
-    quality: u32,
+    q: u32,
     score: f64,
 };
 
@@ -78,9 +75,9 @@ fn interpolateQuantizer(
     var qualities = try std.ArrayList(f64).initCapacity(allocator, 0);
     defer qualities.deinit(allocator);
 
-    for (sorted.items) |item| {
-        try scores.append(allocator, item.score);
-        try qualities.append(allocator, @floatFromInt(item.quality));
+    for (sorted.items) |i| {
+        try scores.append(allocator, i.score);
+        try qualities.append(allocator, @floatFromInt(i.q));
     }
 
     const pred = switch (history.len) {
@@ -106,83 +103,74 @@ pub fn findTargetQuality(
     e: *EncCtx,
     allocator: std.mem.Allocator,
 ) !void {
-    // TODO: these should be parameters
-    const tolerance: f64 = 1.0;
+    const o = &e.o;
 
     var history = try std.ArrayList(PassResult).initCapacity(allocator, 0);
     defer history.deinit(allocator);
-
     var lo_bound: u32 = 0;
     var hi_bound: u32 = 100;
 
-    for (0..e.t.max_pass) |pass| {
-        e.t.num_pass = pass;
+    for (0..o.max_pass) |pass| {
+        e.t.num_pass = pass + 1;
         e.q = if (pass == 0)
-            predictQFromScore(e.o.score_tgt)
+            predictQFromScore(o.score_tgt)
         else
-            try interpolateQuantizer(allocator, lo_bound, hi_bound, history.items, e.o.score_tgt);
-
-        print("Probe {}/{}: Q={} (range: {}-{})\n", .{ pass + 1, e.t.max_pass, e.q, lo_bound, hi_bound });
+            try interpolateQuantizer(allocator, lo_bound, hi_bound, history.items, o.score_tgt);
 
         if (blk: {
             for (history.items) |h|
-                if (h.quality == e.q)
+                if (h.q == e.q)
                     break :blk true;
             break :blk false;
-        }) {
-            print("Quality {} already probed, stopping\n", .{e.q});
+        }) { // quality already probed, stop
             break;
         }
 
         e.t.score = try computeScoreAtQuality(e, allocator);
-        print("  Score: {d:.2}\n", .{e.t.score});
+        try history.append(allocator, PassResult{ .q = e.q, .score = e.t.score });
 
-        try history.append(allocator, PassResult{ .quality = e.q, .score = e.t.score });
-
-        const abs_err = @abs(e.t.score - e.o.score_tgt);
+        // bound search based on error range
+        const abs_err = @abs(e.t.score - o.score_tgt);
         if (pass == 0) {
             const err_bound: u32 = @intFromFloat(@ceil(abs_err) * 4.0);
-            if (e.t.score - e.o.score_tgt > 0) {
+            if (e.t.score - o.score_tgt > 0) {
                 hi_bound = e.q;
                 lo_bound = if (e.q > err_bound) e.q - err_bound else 0;
             } else {
                 lo_bound = e.q;
                 hi_bound = @min(100, e.q + err_bound);
             }
-
-            print("  Bounding search based on error: range now {}-{}\n", .{ lo_bound, hi_bound });
         }
 
-        if (abs_err < tolerance) {
-            print("Target reached within tolerance\n", .{});
+        // we hit the target, exit
+        if (abs_err < o.tolerance)
             return;
-        }
 
+        // if current score > target, set as upper bound; else as lower bound
         if (pass > 0) {
-            if (e.t.score > e.o.score_tgt)
+            if (e.t.score > o.score_tgt)
                 hi_bound = e.q
             else
                 lo_bound = e.q;
         }
 
-        if (lo_bound >= hi_bound - 1) {
-            print("Search range collapsed\n", .{});
+        // search range collapsed, exit
+        if (lo_bound >= hi_bound - 1)
             break;
-        }
     }
 
     var best_q: ?u32 = null;
     var best_score: f64 = 0;
 
+    // pick lowest q that beats target
     for (history.items) |h| {
-        if (h.score >= e.o.score_tgt)
-            if (best_q == null or h.quality < best_q.?) {
-                best_q = h.quality;
+        if (h.score >= o.score_tgt)
+            if (best_q == null or h.q < best_q.?) {
+                best_q = h.q;
                 best_score = h.score;
             };
     }
     if (best_q) |q| {
-        print("Best quality: {} (score: {d:.2})\n", .{ q, best_score });
         e.q = q;
         e.t.score = best_score;
         return;
@@ -193,11 +181,11 @@ pub fn findTargetQuality(
     for (history.items) |h|
         if (h.score > highest_score) {
             highest_score = h.score;
-            highest_q = h.quality;
+            highest_q = h.q;
         };
 
+    // no pass met target, return highest scoring q
     e.q = highest_q;
     e.t.score = highest_score;
-    print("No pass met target, returning highest scoring quality: {} (score: {d:.2})\n", .{ highest_q, highest_score });
     return;
 }

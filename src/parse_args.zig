@@ -8,16 +8,17 @@ pub const AVIF_MAX_SPEED = 10;
 pub const AVIF_MIN_QUALITY = 0;
 pub const AVIF_MAX_QUALITY = 100;
 
-const ARG_QUALITY: [:0]const u8 = "--quality";
-const ARG_QUALITY_ALPHA: [:0]const u8 = "--quality-alpha";
 const ARG_SPEED: [:0]const u8 = "--speed";
+const ARG_SCORE_TGT: [:0]const u8 = "--score-tgt";
+const ARG_QUALITY_ALPHA: [:0]const u8 = "--quality-alpha";
 const ARG_MAX_THREADS: [:0]const u8 = "--max-threads";
 const ARG_TILE_ROWS_LOG2: [:0]const u8 = "--tile-rows-log2";
 const ARG_TILE_COLS_LOG2: [:0]const u8 = "--tile-cols-log2";
 const ARG_AUTO_TILING: [:0]const u8 = "--auto-tiling";
-const ARG_SCORE_TGT: [:0]const u8 = "--score-tgt";
-const ARG_TENBIT: [:0]const u8 = "--tenbit";
 const ARG_TUNE: [:0]const u8 = "--tune";
+const ARG_TENBIT: [:0]const u8 = "--tenbit";
+const ARG_TOLERANCE: [:0]const u8 = "--tolerance";
+const ARG_MAX_PASS: [:0]const u8 = "--max-pass";
 
 pub const TuneMode = enum {
     ssim,
@@ -41,26 +42,25 @@ pub const TuneMode = enum {
 };
 
 pub const AvifEncOptions = struct {
-    quality: i32 = 60,
-    quality_alpha: i32 = @intCast(c.AVIF_QUALITY_LOSSLESS),
-    speed: i32 = 9,
-    max_threads: i32 = 1,
-    tile_rows_log2: i32 = 0,
-    tile_cols_log2: i32 = 0,
+    quality_alpha: u8 = @intCast(c.AVIF_QUALITY_LOSSLESS),
+    speed: u8 = 9,
+    max_threads: u8 = 1,
+    tile_rows_log2: u8 = 0,
+    tile_cols_log2: u8 = 0,
     auto_tiling: bool = true,
     score_tgt: f64 = 80.0,
     tenbit: bool = false,
     tune: TuneMode = .iq,
-    tolerance: f64 = 1.0,
+    tolerance: f64 = 2.0,
+    max_pass: u8 = 6,
 
     pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) void {
-        encoder.quality = options.quality;
         encoder.qualityAlpha = options.quality_alpha;
         encoder.speed = options.speed;
         encoder.maxThreads = options.max_threads;
         encoder.tileRowsLog2 = options.tile_rows_log2;
         encoder.tileColsLog2 = options.tile_cols_log2;
-        encoder.autoTiling = if (options.auto_tiling) c.AVIF_TRUE else c.AVIF_FALSE;
+        encoder.autoTiling = @intFromBool(options.auto_tiling);
         _ = c.avifEncoderSetCodecSpecificOption(encoder, "tune", options.tune.toString());
     }
 
@@ -71,26 +71,28 @@ pub const AvifEncOptions = struct {
             const arg = args[arg_idx];
             arg_idx += 1;
 
-            if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, ARG_QUALITY)) {
-                o.quality = @intCast(try intCliArg(&arg_idx, args, AVIF_MIN_QUALITY, AVIF_MAX_QUALITY, ARG_QUALITY));
-            } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, ARG_SPEED)) {
+            if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, ARG_SPEED)) {
                 o.speed = @intCast(try intCliArg(&arg_idx, args, -1, AVIF_MAX_SPEED, ARG_SPEED));
+            } else if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, ARG_SCORE_TGT)) {
+                o.score_tgt = try floatCliArg(&arg_idx, args, 30.0, 100.0, ARG_SCORE_TGT);
             } else if (std.mem.eql(u8, arg, ARG_QUALITY_ALPHA)) {
                 o.quality_alpha = @intCast(try intCliArg(&arg_idx, args, AVIF_MIN_QUALITY, AVIF_MAX_QUALITY, ARG_QUALITY_ALPHA));
             } else if (std.mem.eql(u8, arg, ARG_MAX_THREADS)) {
-                o.max_threads = @intCast(try intCliArg(&arg_idx, args, 0, 64, ARG_MAX_THREADS));
+                o.max_threads = @intCast(try intCliArg(&arg_idx, args, 0, 255, ARG_MAX_THREADS));
             } else if (std.mem.eql(u8, arg, ARG_TILE_ROWS_LOG2)) {
                 o.tile_rows_log2 = @intCast(try intCliArg(&arg_idx, args, 0, 6, ARG_TILE_ROWS_LOG2));
             } else if (std.mem.eql(u8, arg, ARG_TILE_COLS_LOG2)) {
                 o.tile_cols_log2 = @intCast(try intCliArg(&arg_idx, args, 0, 6, ARG_TILE_COLS_LOG2));
             } else if (std.mem.eql(u8, arg, ARG_AUTO_TILING)) {
                 o.auto_tiling = try boolCliArg(&arg_idx, args, ARG_AUTO_TILING);
-            } else if (std.mem.eql(u8, arg, ARG_SCORE_TGT)) {
-                o.score_tgt = try floatCliArg(&arg_idx, args, 30.0, 100.0, ARG_SCORE_TGT);
-            } else if (std.mem.eql(u8, arg, ARG_TENBIT)) {
-                o.tenbit = try boolCliArg(&arg_idx, args, ARG_TENBIT);
             } else if (std.mem.eql(u8, arg, ARG_TUNE)) {
                 o.tune = try tuneCliArg(&arg_idx, args, ARG_TUNE);
+            } else if (std.mem.eql(u8, arg, ARG_TENBIT)) {
+                o.tenbit = try boolCliArg(&arg_idx, args, ARG_TENBIT);
+            } else if (std.mem.eql(u8, arg, ARG_TOLERANCE)) {
+                o.tolerance = try floatCliArg(&arg_idx, args, 1.0, 100.0, ARG_TOLERANCE);
+            } else if (std.mem.eql(u8, arg, ARG_MAX_PASS)) {
+                o.max_pass = @intCast(try intCliArg(&arg_idx, args, 1, 12, ARG_MAX_PASS));
             } else if (input_file.* == null) {
                 input_file.* = arg;
             } else if (output_file.* == null) {
@@ -168,24 +170,28 @@ pub fn printUsage() void {
         \\    show this help
         \\ -v, --version
         \\    show version information
-        \\ -q, --quality N
-        \\    quality factor for RGB (0..100=lossless) [60]
-        \\ -s, --speed N
+        \\ -s, --speed u8
         \\    encoder speed (0..10) [6]
-        \\ --target N
-        \\    target SSIMULACRA2 score (0-100) [80]
-        \\ --quality-alpha N
-        \\    quality factor for alpha (0-100=lossless) [100]
-        \\ --max-threads N
-        \\    maximum number of threads to use [1]
-        \\ --tile-rows-log2 N
+        \\ -t, --score-tgt f64
+        \\    target SSIMULACRA2 score (0..100) [80]
+        \\ --quality-alpha u8
+        \\    quality factor for alpha (0..100=lossless) [100]
+        \\ --max-threads u8
+        \\    maximum number of threads to use (0..255) [1]
+        \\ --tile-rows-log2 u8
         \\    tile rows log2 (0..6) [0]
-        \\ --tile-cols-log2 N
+        \\ --tile-cols-log2 u8
         \\    tile columns log2 (0..6) [0]
         \\ --auto-tiling 0/1
-        \\    enable automatic tiling [0]
-        \\ --tune MODE
+        \\    enable automatic tiling [1]
+        \\ --tune str
         \\    libaom tuning mode (ssim, iq, ssimulacra2) [iq]
+        \\ --tenbit 0/1
+        \\    10-bit AVIF encoding [0]
+        \\ --tolerance f64
+        \\    target quality error tolerance (1..100) [2]
+        \\ --max-pass u8
+        \\    maximum search passes (1..12) [6]
     , .{});
     print("\n\n\x1b[37mInput image formats: PNG, PAM, JPEG, WebP, or AVIF\x1b[0m\n", .{});
 }

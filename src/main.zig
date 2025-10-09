@@ -197,19 +197,14 @@ pub fn main() !void {
     e.w = @intCast(ref_image.width);
     e.h = @intCast(ref_image.height);
 
-    print("Target SSIMULACRA2 score: {d:.2}\n", .{o.score_tgt});
-    print("Starting probe-based quality search...\n\n", .{});
+    print("Searching [tgt {}, speed {}, {}-pass]\n", .{ o.score_tgt, o.speed, e.o.max_pass });
 
     try tq.findTargetQuality(&e, allocator);
 
-    print("\nEncoding final output with quality {}...\n", .{e.q});
+    print("Found q{} (score {d:.2}, {} passes)\n", .{ e.q, e.t.score, e.t.num_pass });
 
     try encodeAvif(&e, allocator, output_path);
 
-    // TODO: Remove all debug prints, add a debug flag that prints
-    // all of the EncCtx stats
-    print("\nFinal output:\n", .{});
-    print("  Quality: {}\n", .{e.q});
-    print("  SSIMULACRA2: {d:.2}\n", .{e.t.score});
-    print("  Size: {} bytes\n", .{e.size});
+    const bpp: f64 = @as(f64, @floatFromInt(e.size * 8)) / @as(f64, @floatFromInt(e.w * e.h));
+    print("Compressed to {} bytes ({d:.3} bpp)\n", .{ e.size, bpp });
 }
