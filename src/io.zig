@@ -302,6 +302,53 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
     };
 }
 
+const AvifDecodeResult = struct {
+    decoder: *c.avifDecoder,
+    rgb: c.avifRGBImage,
+};
+
+fn decodeAvifCommon(data: []const u8) !AvifDecodeResult {
+    const decoder = c.avifDecoderCreate();
+    if (decoder == null) return error.AvifCreateDecoderFailed;
+
+    var r = c.avifDecoderSetIOMemory(decoder, data.ptr, data.len);
+    if (r != c.AVIF_RESULT_OK) return error.AvifSetIOMemoryFailed;
+
+    r = c.avifDecoderParse(decoder);
+    if (r != c.AVIF_RESULT_OK) return error.AvifParseFailed;
+
+    r = c.avifDecoderNextImage(decoder);
+    if (r != c.AVIF_RESULT_OK) return error.AvifNoImageDecoded;
+
+    var rgb = c.avifRGBImage{};
+    c.avifRGBImageSetDefaults(&rgb, decoder.*.image);
+    rgb.format = c.AVIF_RGB_FORMAT_RGB;
+    rgb.depth = 8;
+
+    r = c.avifRGBImageAllocatePixels(&rgb);
+    if (r != c.AVIF_RESULT_OK) return error.AvifAllocatePixelsFailed;
+
+    r = c.avifImageYUVToRGB(decoder.*.image, &rgb);
+    if (r != c.AVIF_RESULT_OK) return error.AvifYUVToRGBFailed;
+
+    return .{ .decoder = decoder, .rgb = rgb };
+}
+
+fn copyRgbPixels(allocator: std.mem.Allocator, rgb: c.avifRGBImage, width: usize, height: usize) ![]u8 {
+    const row_bytes = rgb.rowBytes;
+    const out_size = width * height * 3;
+    const out = try allocator.alloc(u8, out_size);
+
+    const src_pixels: [*]const u8 = @ptrCast(rgb.pixels);
+    for (0..height) |y| {
+        const src_off = y * row_bytes;
+        const dst_off = y * width * 3;
+        @memcpy(out[dst_off .. dst_off + width * 3], src_pixels[src_off .. src_off + width * 3]);
+    }
+
+    return out;
+}
+
 pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
@@ -310,53 +357,20 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
     defer allocator.free(buf);
     _ = try file.readAll(buf);
 
-    const decoder = c.avifDecoderCreate();
-    if (decoder == null) return error.AvifCreateDecoderFailed;
-    defer c.avifDecoderDestroy(decoder);
+    var result = try decodeAvifCommon(buf);
+    defer c.avifRGBImageFreePixels(@ptrCast(&result.rgb));
+    defer c.avifDecoderDestroy(result.decoder);
 
-    // decode the first frame
-    var r = c.avifDecoderSetIOMemory(decoder, buf.ptr, buf.len);
-    if (r != c.AVIF_RESULT_OK) return error.AvifSetIOMemoryFailed;
-    r = c.avifDecoderParse(decoder);
-    if (r != c.AVIF_RESULT_OK) return error.AvifParseFailed;
-    r = c.avifDecoderNextImage(decoder);
-    if (r != c.AVIF_RESULT_OK) return error.AvifNoImageDecoded;
-
-    // request 8-bit RGB out
-    var rgb = c.avifRGBImage{};
-    c.avifRGBImageSetDefaults(&rgb, decoder[0].image);
-    rgb.format = c.AVIF_RGB_FORMAT_RGB;
-    rgb.depth = 8;
-
-    r = c.avifRGBImageAllocatePixels(&rgb);
-    if (r != c.AVIF_RESULT_OK) return error.AvifAllocatePixelsFailed;
-    defer c.avifRGBImageFreePixels(&rgb);
-
-    r = c.avifImageYUVToRGB(decoder[0].image, &rgb);
-    if (r != c.AVIF_RESULT_OK) return error.AvifYUVToRGBFailed;
-
-    const img_ptr = decoder[0].image;
+    const img_ptr = result.decoder.*.image;
     const width: usize = @intCast(img_ptr.*.width);
     const height: usize = @intCast(img_ptr.*.height);
-    const rowBytes: usize = @intCast(rgb.rowBytes);
-    const channels: usize = 3;
 
-    const out_size = width * height * channels;
-    const out_buf = try allocator.alloc(u8, out_size);
-    errdefer allocator.free(out_buf);
-
-    const src_pixels: [*]const u8 = @ptrCast(rgb.pixels);
-    const src_all: []const u8 = src_pixels[0..(rowBytes * height)];
-    for (0..height) |y| {
-        const src_off = y * rowBytes;
-        const dst_off = y * width * channels;
-        @memcpy(out_buf[dst_off .. dst_off + width * channels], src_all[src_off .. src_off + width * channels]);
-    }
+    const out_buf = try copyRgbPixels(allocator, result.rgb, width, height);
 
     return .{
         .width = width,
         .height = height,
-        .channels = @intCast(channels),
+        .channels = 3,
         .data = out_buf,
     };
 }
@@ -437,48 +451,17 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     try output.appendSlice(allocator, @as([*]const u8, @ptrCast(avif_output.data))[0..avif_output.size]);
 }
 
-// TODO: Refactor to eliminate duplicate functionality with `loadAVIF()` in `io.zig`
 // TODO: Confirm we're using dav1d when possible
 pub fn decodeAvifToRgb(allocator: std.mem.Allocator, avif_data: []const u8) ![]u8 {
-    const decoder = c.avifDecoderCreate();
-    if (decoder == null) return error.OutOfMemory;
-    defer c.avifDecoderDestroy(decoder);
+    var result = try decodeAvifCommon(avif_data);
+    defer c.avifRGBImageFreePixels(@ptrCast(&result.rgb));
+    defer c.avifDecoderDestroy(result.decoder);
 
-    var set_result = c.avifDecoderSetIOMemory(decoder, avif_data.ptr, avif_data.len);
-    if (set_result != c.AVIF_RESULT_OK) return error.SetIOMemoryFailed;
-
-    set_result = c.avifDecoderParse(decoder);
-    if (set_result != c.AVIF_RESULT_OK) return error.ParseFailed;
-
-    set_result = c.avifDecoderNextImage(decoder);
-    if (set_result != c.AVIF_RESULT_OK) return error.NoImageDecoded;
-
-    var rgb = c.avifRGBImage{};
-    c.avifRGBImageSetDefaults(&rgb, decoder.*.image);
-    rgb.format = c.AVIF_RGB_FORMAT_RGB;
-
-    set_result = c.avifRGBImageAllocatePixels(&rgb);
-    if (set_result != c.AVIF_RESULT_OK) return error.AllocatePixelsFailed;
-    defer c.avifRGBImageFreePixels(&rgb);
-
-    set_result = c.avifImageYUVToRGB(decoder.*.image, &rgb);
-    if (set_result != c.AVIF_RESULT_OK) return error.YUVToRGBFailed;
-
-    const img = decoder.*.image;
+    const img = result.decoder.*.image;
     const width = img.*.width;
     const height = img.*.height;
-    const row_bytes = rgb.rowBytes;
-    const out_size = width * height * 3;
-    const out = try allocator.alloc(u8, out_size);
 
-    const src_pixels: [*]const u8 = @ptrCast(rgb.pixels);
-    for (0..height) |y| {
-        const src_off = y * row_bytes;
-        const dst_off = y * width * 3;
-        @memcpy(out[dst_off .. dst_off + width * 3], src_pixels[src_off .. src_off + width * 3]);
-    }
-
-    return out;
+    return try copyRgbPixels(allocator, result.rgb, width, height);
 }
 
 pub fn encodeAvifToFile(e: *EncCtx, allocator: std.mem.Allocator, output_path: []const u8) !void {

@@ -68,7 +68,7 @@ pub fn main() !void {
     e.w = @intCast(ref_image.width);
     e.h = @intCast(ref_image.height);
 
-    print("Searching [tgt {}, speed {}, {}-pass]\n", .{ o.score_tgt, o.speed, o.max_pass });
+    print("Searching [tgt {}±{d:.1}, speed {}, {}-pass]\n", .{ o.score_tgt, o.tolerance, o.speed, o.max_pass });
 
     try tq.findTargetQuality(&e, allocator);
 
