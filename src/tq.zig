@@ -16,7 +16,7 @@ const PassResult = struct {
     score: f64,
 };
 
-pub fn computeScoreAtQuality(e: *EncCtx, allocator: std.mem.Allocator) !f64 {
+fn computeScoreAtQuality(e: *EncCtx, allocator: std.mem.Allocator) !f64 {
     var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
     defer avif_data.deinit(allocator);
     try io.encodeAvifToBuffer(e, allocator, &avif_data);
@@ -24,6 +24,7 @@ pub fn computeScoreAtQuality(e: *EncCtx, allocator: std.mem.Allocator) !f64 {
     const decoded_rgb = try io.decodeAvifToRgb(allocator, avif_data.items);
     defer allocator.free(decoded_rgb);
 
+    e.t.num_pass += 1;
     return try fssimu2.computeSsimu2(allocator, e.rgb, decoded_rgb, e.w, e.h, 3, null);
 }
 
@@ -123,7 +124,6 @@ pub fn findTargetQuality(
     var hi_bound: u32 = 100;
 
     for (0..o.max_pass) |pass| {
-        e.t.num_pass = pass + 1;
         e.q = if (pass == 0)
             predictQFromScore(o.score_tgt)
         else
