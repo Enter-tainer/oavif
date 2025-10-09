@@ -490,5 +490,5 @@ pub fn encodeAvifToFile(e: *EncCtx, allocator: std.mem.Allocator, output_path: [
     const file = try std.fs.cwd().createFile(output_path, .{});
     defer file.close();
     try file.writeAll(avif_data.items);
-    e.size = avif_data.items.len;
+    e.buf.size = avif_data.items.len;
 }

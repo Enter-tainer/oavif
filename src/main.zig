@@ -7,6 +7,20 @@ const tq = @import("tq.zig");
 const print = std.debug.print;
 const VERSION = @import("build_opts").version;
 
+const EncBuffer = struct {
+    q: ?u32 = null,
+    data: ?std.ArrayList(u8) = null,
+    size: usize = 0,
+
+    pub fn deinitCache(buf: *EncBuffer, allocator: std.mem.Allocator) void {
+        if (buf.data) |*data| {
+            data.deinit(allocator);
+            buf.data = null;
+        }
+        buf.q = null;
+    }
+};
+
 pub const EncCtx = struct {
     o: a.AvifEncOptions = a.AvifEncOptions{},
     t: tq.TQCtx = tq.TQCtx{},
@@ -15,7 +29,7 @@ pub const EncCtx = struct {
     h: u32 = 0,
     rgb: []const u8 = undefined,
     src: io.Image = undefined,
-    size: usize = 0,
+    buf: EncBuffer = EncBuffer{},
 };
 
 pub fn main() !void {
@@ -56,15 +70,16 @@ pub fn main() !void {
 
     e.src = try io.loadImage(allocator, input_path);
     defer e.src.deinit(allocator);
+    const src = &e.src;
 
     print("Read {}x{}, {s}, {} bytes\n", .{
-        e.src.width,
-        e.src.height,
-        if (e.src.channels > 3) "RGBA" else "RGB",
+        src.width,
+        src.height,
+        if (src.channels > 3) "RGBA" else "RGB",
         (try std.fs.cwd().statFile(input_file.?)).size,
     });
 
-    e.rgb = if (e.src.channels == 3) e.src.data else try e.src.toRGB8(allocator);
+    e.rgb = if (e.src.channels == 3) src.data else try src.toRGB8(allocator);
     defer if (e.src.channels != 3) allocator.free(e.rgb);
     e.w = @intCast(e.src.width);
     e.h = @intCast(e.src.height);
@@ -72,11 +87,18 @@ pub fn main() !void {
     print("Searching [tgt {}±{d:.1}, speed {}, {}-pass]\n", .{ o.score_tgt, o.tolerance, o.speed, o.max_pass });
 
     try tq.findTargetQuality(&e, allocator);
+    defer e.buf.deinitCache(allocator);
+    const buf = &e.buf;
 
     print("Found q{} (score {d:.2}, {} passes)\n", .{ e.q, e.t.score, e.t.num_pass });
 
-    try io.encodeAvifToFile(&e, allocator, output_path);
+    // if we already have a buffer at the best Q, write
+    if (buf.q.? == e.q) {
+        const file = try std.fs.cwd().createFile(output_path, .{});
+        defer file.close();
+        try file.writeAll(buf.data.?.items);
+    } else try io.encodeAvifToFile(&e, allocator, output_path);
 
-    const bpp: f64 = @as(f64, @floatFromInt(e.size * 8)) / @as(f64, @floatFromInt(e.w * e.h));
-    print("Compressed to {} bytes ({d:.3} bpp)\n", .{ e.size, bpp });
+    const bpp: f64 = @as(f64, @floatFromInt(e.buf.size * 8)) / @as(f64, @floatFromInt(e.w * e.h));
+    print("Compressed to {} bytes ({d:.3} bpp)\n", .{ e.buf.size, bpp });
 }
