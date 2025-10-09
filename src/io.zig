@@ -325,13 +325,23 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
     defer allocator.free(buf);
     _ = try file.readAll(buf);
 
+    var features: c.WebPBitstreamFeatures = undefined;
+    if (c.WebPGetFeatures(buf.ptr, buf.len, &features) != c.VP8_STATUS_OK)
+        return error.WebPGetFeaturesFailed;
+
+    const has_alpha = features.has_alpha != 0;
+    const channels: u8 = if (has_alpha) 4 else 3;
+
     var width: c_int = 0;
     var height: c_int = 0;
-    const data = c.WebPDecodeRGBA(buf.ptr, buf.len, &width, &height);
+    const data = if (has_alpha)
+        c.WebPDecodeRGBA(buf.ptr, buf.len, &width, &height)
+    else
+        c.WebPDecodeRGB(buf.ptr, buf.len, &width, &height);
     if (data == null) return error.WebPDecodeFailed;
     defer c.WebPFree(data);
 
-    const out_size = @as(usize, @intCast(width)) * @as(usize, @intCast(height)) * 4;
+    const out_size = @as(usize, @intCast(width)) * @as(usize, @intCast(height)) * channels;
     const out_buf = try allocator.alloc(u8, out_size);
     errdefer allocator.free(out_buf);
     @memcpy(out_buf, @as([*]const u8, @ptrCast(data))[0..out_size]);
@@ -339,7 +349,7 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
     return .{
         .width = @intCast(width),
         .height = @intCast(height),
-        .channels = 4,
+        .channels = channels,
         .data = out_buf,
     };
 }
