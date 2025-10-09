@@ -7,10 +7,11 @@ const tq = @import("tq.zig");
 const print = std.debug.print;
 const VERSION = @import("build_opts").version;
 
+// AVIF encoded data buffer
 const EncBuffer = struct {
-    q: ?u32 = null,
-    data: ?std.ArrayList(u8) = null,
-    size: usize = 0,
+    q: ?u32 = null, // Q used
+    data: ?std.ArrayList(u8) = null, // AVIF
+    size: usize = 0, // data size
 
     pub fn deinitCache(buf: *EncBuffer, allocator: std.mem.Allocator) void {
         if (buf.data) |*data| {
@@ -21,15 +22,16 @@ const EncBuffer = struct {
     }
 };
 
+// Encoder Context
 pub const EncCtx = struct {
-    o: a.AvifEncOptions = a.AvifEncOptions{},
-    t: tq.TQCtx = tq.TQCtx{},
-    q: u32 = 0,
-    w: u32 = 0,
-    h: u32 = 0,
-    rgb: []const u8 = undefined,
-    src: io.Image = undefined,
-    buf: EncBuffer = EncBuffer{},
+    o: a.AvifEncOptions = a.AvifEncOptions{}, // user options
+    t: tq.TQCtx = tq.TQCtx{}, // TQ context
+    q: u32 = 0, // final chosen Q, updated in-loop
+    w: u32 = 0, // input width
+    h: u32 = 0, // input height
+    rgb: []const u8 = undefined, // decoded input RGB buffer
+    src: io.Image = undefined, // input image
+    buf: EncBuffer = EncBuffer{}, // compressed AVIF
 };
 
 pub fn main() !void {
@@ -92,7 +94,7 @@ pub fn main() !void {
 
     print("Found q{} (score {d:.2}, {} passes)\n", .{ e.q, e.t.score, e.t.num_pass });
 
-    // if we already have a buffer at the best Q, write
+    // if we have a buffer at the best Q, write
     if (buf.q.? == e.q) {
         const file = try std.fs.cwd().createFile(output_path, .{});
         defer file.close();

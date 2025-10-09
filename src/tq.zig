@@ -6,14 +6,16 @@ const io = @import("io.zig");
 const print = std.debug.print;
 const EncCtx = @import("main.zig").EncCtx;
 
+// TQ context
 pub const TQCtx = struct {
-    num_pass: usize = 0,
-    score: f64 = 0.0,
+    num_pass: usize = 0, // which pass we are on
+    score: f64 = 0.0, // current score
 };
 
+// TQ pass result
 const PassResult = struct {
-    q: u32,
-    score: f64,
+    q: u32, // Q used
+    score: f64, // score result
 };
 
 fn computeScoreAtQuality(e: *EncCtx, allocator: std.mem.Allocator) !f64 {
@@ -180,30 +182,28 @@ pub fn findTargetQuality(
 
     var best_q: ?u32 = null;
     var best_score: f64 = 0;
+    var highest_q: u32 = 0;
+    var highest_score: f64 = 0;
+
+    for (history.items) |h| {
+        if (h.score >= o.score_tgt and (best_q == null or h.q < best_q.?)) {
+            best_q = h.q;
+            best_score = h.score;
+        }
+        if (@max(h.score, 0) >= highest_score) {
+            highest_score = h.score;
+            highest_q = h.q;
+        }
+    }
 
     // pick lowest q that beats target
-    for (history.items) |h| {
-        if (h.score >= o.score_tgt)
-            if (best_q == null or h.q < best_q.?) {
-                best_q = h.q;
-                best_score = h.score;
-            };
-    }
     if (best_q) |q| {
         e.q = q;
         e.t.score = best_score;
         return;
     }
 
-    var highest_score: f64 = 0;
-    var highest_q: u32 = 0;
-    for (history.items) |h|
-        if (h.score > highest_score) {
-            highest_score = h.score;
-            highest_q = h.q;
-        };
-
-    // no pass met target, return highest scoring q
+    // no pass met target, use highest scoring q
     e.q = highest_q;
     e.t.score = highest_score;
     return;

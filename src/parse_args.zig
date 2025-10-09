@@ -18,6 +18,7 @@ const ARG_TENBIT: [:0]const u8 = "--tenbit";
 const ARG_TOLERANCE: [:0]const u8 = "--tolerance";
 const ARG_MAX_PASS: [:0]const u8 = "--max-pass";
 
+// libaom image tune, used when there is no alpha channel
 pub const TuneMode = enum {
     ssim,
     iq,
@@ -39,6 +40,7 @@ pub const TuneMode = enum {
     }
 };
 
+// AVIF encoder options – see help menu for member info
 pub const AvifEncOptions = struct {
     quality_alpha: u8 = @intCast(c.AVIF_QUALITY_LOSSLESS),
     speed: u8 = 9,
