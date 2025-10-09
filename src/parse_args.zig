@@ -1,12 +1,10 @@
 const std = @import("std");
-const print = std.debug.print;
+
 const c = @cImport({
     @cInclude("avif/avif.h");
 });
 
-pub const AVIF_MAX_SPEED = 10;
-pub const AVIF_MIN_QUALITY = 0;
-pub const AVIF_MAX_QUALITY = 100;
+const print = std.debug.print;
 
 const ARG_SPEED: [:0]const u8 = "--speed";
 const ARG_SCORE_TGT: [:0]const u8 = "--score-tgt";
@@ -72,11 +70,11 @@ pub const AvifEncOptions = struct {
             arg_idx += 1;
 
             if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, ARG_SPEED)) {
-                o.speed = @intCast(try intCliArg(&arg_idx, args, -1, AVIF_MAX_SPEED, ARG_SPEED));
+                o.speed = @intCast(try intCliArg(&arg_idx, args, 0, 10, ARG_SPEED));
             } else if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, ARG_SCORE_TGT)) {
                 o.score_tgt = try floatCliArg(&arg_idx, args, 30.0, 100.0, ARG_SCORE_TGT);
             } else if (std.mem.eql(u8, arg, ARG_QUALITY_ALPHA)) {
-                o.quality_alpha = @intCast(try intCliArg(&arg_idx, args, AVIF_MIN_QUALITY, AVIF_MAX_QUALITY, ARG_QUALITY_ALPHA));
+                o.quality_alpha = @intCast(try intCliArg(&arg_idx, args, 0, 100, ARG_QUALITY_ALPHA));
             } else if (std.mem.eql(u8, arg, ARG_MAX_THREADS)) {
                 o.max_threads = @intCast(try intCliArg(&arg_idx, args, 0, 255, ARG_MAX_THREADS));
             } else if (std.mem.eql(u8, arg, ARG_TILE_ROWS_LOG2)) {

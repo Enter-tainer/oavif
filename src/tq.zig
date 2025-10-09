@@ -1,6 +1,9 @@
 const std = @import("std");
+
+const fssimu2 = @import("fssimu2");
+const io = @import("io.zig");
+
 const print = std.debug.print;
-const computeScoreAtQuality = @import("main.zig").computeScoreAtQuality;
 const EncCtx = @import("main.zig").EncCtx;
 
 pub const TQCtx = struct {
@@ -13,9 +16,18 @@ const PassResult = struct {
     score: f64,
 };
 
+pub fn computeScoreAtQuality(e: *EncCtx, allocator: std.mem.Allocator) !f64 {
+    var avif_data = try std.ArrayListAligned(u8, null).initCapacity(allocator, 0);
+    defer avif_data.deinit(allocator);
+    try io.encodeAvifToBuffer(e, allocator, &avif_data);
+
+    const decoded_rgb = try io.decodeAvifToRgb(allocator, avif_data.items);
+    defer allocator.free(decoded_rgb);
+
+    return try fssimu2.computeSsimu2(allocator, e.rgb, decoded_rgb, e.w, e.h, 3, null);
+}
+
 inline fn predictQFromScore(tgt: f64) u32 {
-    // Use exponential formula to predict Q from target SSIMULACRA2
-    // Q = 6.83 * e^(0.0282 * target)
     const q = 6.83 * @exp(0.0282 * tgt);
     return @intFromFloat(@min(100.0, @round(q)));
 }
