@@ -52,14 +52,16 @@ pub const AvifEncOptions = struct {
     tolerance: f64 = 2.0,
     max_pass: u8 = 6,
 
-    pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) void {
+    pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder, alpha: bool) !void {
         encoder.qualityAlpha = options.quality_alpha;
         encoder.speed = options.speed;
         encoder.maxThreads = options.max_threads;
         encoder.tileRowsLog2 = options.tile_rows_log2;
         encoder.tileColsLog2 = options.tile_cols_log2;
         encoder.autoTiling = @intFromBool(options.auto_tiling);
-        _ = c.avifEncoderSetCodecSpecificOption(encoder, "tune", options.tune.toString());
+        if (!alpha)
+            if (c.avifEncoderSetCodecSpecificOption(encoder, "tune", options.tune.toString()) != c.AVIF_RESULT_OK)
+                return error.InvalidCodecOption;
     }
 
     pub fn parseArgs(o: *AvifEncOptions, args: [][:0]u8, input_file: *?[]const u8, output_file: *?[]const u8) !void {

@@ -39,9 +39,51 @@ pub const Image = struct {
     channels: u8, // 1=Gray,2=GrayA,3=RGB,4=RGBA
     data: []u8, // interleaved, row-major
 
-    pub fn deinit(self: *Image, allocator: std.mem.Allocator) void {
-        allocator.free(self.data);
-        self.* = undefined;
+    pub fn deinit(img: *Image, allocator: std.mem.Allocator) void {
+        allocator.free(img.data);
+        img.* = undefined;
+    }
+
+    pub fn toRGB8(img: *Image, allocator: std.mem.Allocator) ![]u8 {
+        const pixels = img.width * img.height;
+        const rgb = try allocator.alloc(u8, pixels * 3);
+        switch (img.channels) {
+            3 => {
+                // direct copy
+                for (0..pixels) |i| {
+                    rgb[i * 3 + 0] = img.data[i * 3 + 0];
+                    rgb[i * 3 + 1] = img.data[i * 3 + 1];
+                    rgb[i * 3 + 2] = img.data[i * 3 + 2];
+                }
+            },
+            4 => {
+                for (0..pixels) |i| {
+                    rgb[i * 3 + 0] = img.data[i * 4 + 0];
+                    rgb[i * 3 + 1] = img.data[i * 4 + 1];
+                    rgb[i * 3 + 2] = img.data[i * 4 + 2];
+                }
+            },
+            1 => {
+                // replicate grayscale channel
+                for (0..pixels) |i| {
+                    const g = img.data[i];
+                    rgb[i * 3 + 0] = g;
+                    rgb[i * 3 + 1] = g;
+                    rgb[i * 3 + 2] = g;
+                }
+            },
+            2 => {
+                // grayscale + alpha -> ignore alpha
+                for (0..pixels) |i| {
+                    const g = img.data[i * 2 + 0];
+                    rgb[i * 3 + 0] = g;
+                    rgb[i * 3 + 1] = g;
+                    rgb[i * 3 + 2] = g;
+                }
+            },
+            else => return error.UnsupportedChannelCount,
+        }
+        return rgb;
     }
 };
 
@@ -375,48 +417,6 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
     };
 }
 
-pub fn toRGB8(allocator: std.mem.Allocator, img: Image) ![]u8 {
-    const pixels = img.width * img.height;
-    const rgb = try allocator.alloc(u8, pixels * 3);
-    switch (img.channels) {
-        3 => {
-            // direct copy
-            for (0..pixels) |i| {
-                rgb[i * 3 + 0] = img.data[i * 3 + 0];
-                rgb[i * 3 + 1] = img.data[i * 3 + 1];
-                rgb[i * 3 + 2] = img.data[i * 3 + 2];
-            }
-        },
-        4 => {
-            for (0..pixels) |i| {
-                rgb[i * 3 + 0] = img.data[i * 4 + 0];
-                rgb[i * 3 + 1] = img.data[i * 4 + 1];
-                rgb[i * 3 + 2] = img.data[i * 4 + 2];
-            }
-        },
-        1 => {
-            // replicate grayscale channel
-            for (0..pixels) |i| {
-                const g = img.data[i];
-                rgb[i * 3 + 0] = g;
-                rgb[i * 3 + 1] = g;
-                rgb[i * 3 + 2] = g;
-            }
-        },
-        2 => {
-            // grayscale + alpha -> ignore alpha
-            for (0..pixels) |i| {
-                const g = img.data[i * 2 + 0];
-                rgb[i * 3 + 0] = g;
-                rgb[i * 3 + 1] = g;
-                rgb[i * 3 + 2] = g;
-            }
-        },
-        else => return error.UnsupportedChannelCount,
-    }
-    return rgb;
-}
-
 // Encode functions
 pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std.ArrayListAligned(u8, null)) !void {
     const o = &e.o;
@@ -426,9 +426,9 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
 
     var rgb_img = c.avifRGBImage{};
     c.avifRGBImageSetDefaults(&rgb_img, image);
-    rgb_img.format = c.AVIF_RGB_FORMAT_RGB;
-    rgb_img.pixels = @ptrCast(@constCast(e.rgb.ptr));
-    rgb_img.rowBytes = e.w * 3;
+    rgb_img.format = if (e.src.channels == 4) c.AVIF_RGB_FORMAT_RGBA else c.AVIF_RGB_FORMAT_RGB;
+    rgb_img.pixels = @ptrCast(@constCast(e.src.data.ptr));
+    rgb_img.rowBytes = e.w * e.src.channels;
 
     const convert_result = c.avifImageRGBToYUV(image, &rgb_img);
     if (convert_result != c.AVIF_RESULT_OK) return error.ConvertFailed;
@@ -437,9 +437,10 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     if (avifenc == null) return error.OutOfMemory;
     defer c.avifEncoderDestroy(avifenc);
 
-    e.o.copyToEncoder(@ptrCast(avifenc));
+    try e.o.copyToEncoder(@ptrCast(avifenc), e.src.channels == 4);
 
     avifenc.*.quality = @intCast(e.q);
+    avifenc.*.qualityAlpha = @intCast(e.q);
 
     var avif_output = c.avifRWData{ .data = null, .size = 0 };
     if (c.avifEncoderAddImage(avifenc, image, 1, c.AVIF_ADD_IMAGE_FLAG_SINGLE) != c.AVIF_RESULT_OK)

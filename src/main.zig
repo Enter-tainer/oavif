@@ -14,6 +14,7 @@ pub const EncCtx = struct {
     w: u32 = 0,
     h: u32 = 0,
     rgb: []const u8 = undefined,
+    src: io.Image = undefined,
     size: usize = 0,
 };
 
@@ -53,20 +54,20 @@ pub fn main() !void {
     const output_path =
         if (output_file) |out| out else return error.MissingInputOrOutput;
 
-    var ref_image: io.Image = try io.loadImage(allocator, input_path);
-    defer ref_image.deinit(allocator);
+    e.src = try io.loadImage(allocator, input_path);
+    defer e.src.deinit(allocator);
 
     print("Read {}x{}, {s}, {} bytes\n", .{
-        ref_image.width,
-        ref_image.height,
-        if (ref_image.channels > 3) "RGBA" else "RGB",
+        e.src.width,
+        e.src.height,
+        if (e.src.channels > 3) "RGBA" else "RGB",
         (try std.fs.cwd().statFile(input_file.?)).size,
     });
 
-    e.rgb = if (ref_image.channels == 3) ref_image.data else try io.toRGB8(allocator, ref_image);
-    defer if (ref_image.channels != 3) allocator.free(e.rgb);
-    e.w = @intCast(ref_image.width);
-    e.h = @intCast(ref_image.height);
+    e.rgb = if (e.src.channels == 3) e.src.data else try e.src.toRGB8(allocator);
+    defer if (e.src.channels != 3) allocator.free(e.rgb);
+    e.w = @intCast(e.src.width);
+    e.h = @intCast(e.src.height);
 
     print("Searching [tgt {}±{d:.1}, speed {}, {}-pass]\n", .{ o.score_tgt, o.tolerance, o.speed, o.max_pass });
 
