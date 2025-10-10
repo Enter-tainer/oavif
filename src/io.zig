@@ -43,7 +43,7 @@ pub const Image = struct {
     width: usize,
     height: usize,
     channels: u8, // 1=Gray,2=GrayA,3=RGB,4=RGBA
-    depth: u8, // bit depth: 8, 10, or 16
+    hbd: bool, // high bit depth (16-bit)
     data: []u8, // interleaved, row-major
 
     pub fn deinit(img: *Image, allocator: std.mem.Allocator) void {
@@ -55,7 +55,7 @@ pub const Image = struct {
         const pixels = img.width * img.height;
         const rgb = try allocator.alloc(u8, pixels * 3);
 
-        if (img.depth == 16) {
+        if (img.hbd) {
             // downscale to 8-bit
             const src_u16 = @as([*]const u16, @ptrCast(@alignCast(img.data.ptr)));
             switch (img.channels) {
@@ -213,7 +213,7 @@ pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
         .width = width,
         .height = height,
         .channels = @intCast(channels),
-        .depth = 8,
+        .hbd = false,
         .data = out_buf,
     };
 }
@@ -264,13 +264,11 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
         else => 4,
     };
 
-    const depth: u8 = if (is_16bit) 16 else 8;
-
     return .{
         .width = ihdr.width,
         .height = ihdr.height,
         .channels = channels,
-        .depth = depth,
+        .hbd = is_16bit,
         .data = out_buf,
     };
 }
@@ -368,7 +366,7 @@ pub fn loadPAM(allocator: std.mem.Allocator, path: []const u8) !Image {
         .width = width,
         .height = height,
         .channels = channels,
-        .depth = 8,
+        .hbd = false,
         .data = out,
     };
 }
@@ -406,7 +404,7 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
         .width = @intCast(width),
         .height = @intCast(height),
         .channels = channels,
-        .depth = 8,
+        .hbd = false,
         .data = out_buf,
     };
 }
@@ -481,20 +479,28 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
     const channels: u8 = if (result.rgb.format == c.AVIF_RGB_FORMAT_RGBA) 4 else 3;
 
     const out_buf = try copyRgbPixels(allocator, result.rgb, width, height);
-    const depth: u8 = @intCast(result.rgb.depth);
+
+    const hbd: bool = result.rgb.depth > 8;
+    if (hbd) {
+        const pixels = width * height * channels;
+        const src_u16 = @as([*]u16, @ptrCast(@alignCast(out_buf.ptr)))[0..pixels];
+        const shift: u4 = @intCast(16 - result.rgb.depth);
+        for (src_u16) |*pixel|
+            pixel.* = pixel.* << shift;
+    }
 
     return .{
         .width = width,
         .height = height,
         .channels = channels,
-        .depth = depth,
+        .hbd = hbd,
         .data = out_buf,
     };
 }
 
 pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std.ArrayListAligned(u8, null)) !void {
     const o = &e.o;
-    const output_depth: u32 = if (o.tenbit) 10 else if (e.src.depth >= 10) 10 else 8;
+    const output_depth: u32 = if (o.tenbit) 10 else if (e.src.hbd) 10 else 8;
 
     const image = c.avifImageCreate(e.w, e.h, output_depth, c.AVIF_PIXEL_FORMAT_YUV444);
     if (image == null) return error.OutOfMemory;
@@ -504,7 +510,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     c.avifRGBImageSetDefaults(&rgb_img, image);
     rgb_img.format = if (e.src.channels == 4) c.AVIF_RGB_FORMAT_RGBA else c.AVIF_RGB_FORMAT_RGB;
 
-    if (e.src.depth == 8 and output_depth == 10) {
+    if (!e.src.hbd and output_depth == 10) {
         const pixels = e.w * e.h;
         const scaled_data = try allocator.alloc(u16, pixels * e.src.channels);
         defer allocator.free(scaled_data);
@@ -518,7 +524,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
 
         if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
             return error.ConvertFailed;
-    } else if (e.src.depth == 16 and output_depth == 10) {
+    } else if (e.src.hbd and output_depth == 10) {
         const pixels = e.w * e.h;
         const scaled_data = try allocator.alloc(u16, pixels * e.src.channels);
         defer allocator.free(scaled_data);
@@ -533,7 +539,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
 
         if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
             return error.ConvertFailed;
-    } else if (e.src.depth == 16 and output_depth == 8) {
+    } else if (e.src.hbd and output_depth == 8) {
         const pixels = e.w * e.h;
         const scaled_data = try allocator.alloc(u8, pixels * e.src.channels);
         defer allocator.free(scaled_data);
@@ -550,8 +556,8 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
             return error.ConvertFailed;
     } else {
         rgb_img.pixels = @ptrCast(@constCast(e.src.data.ptr));
-        rgb_img.rowBytes = e.w * e.src.channels * if (e.src.depth > 8) @as(u32, 2) else @as(u32, 1);
-        rgb_img.depth = e.src.depth;
+        rgb_img.rowBytes = e.w * e.src.channels * if (e.src.hbd) @as(u32, 2) else @as(u32, 1);
+        rgb_img.depth = if (e.src.hbd) 16 else 8;
 
         if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
             return error.ConvertFailed;

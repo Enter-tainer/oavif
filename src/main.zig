@@ -74,20 +74,22 @@ pub fn main() !void {
     defer e.src.deinit(allocator);
     const src = &e.src;
 
+    const in_depth: u8 = if (src.hbd) 16 else 8;
     print("Read {}x{}, {s}, {}-bit, {} bytes\n", .{
         src.width,
         src.height,
         if (src.channels > 3) "RGBA" else "RGB",
-        src.depth,
+        in_depth,
         (try std.fs.cwd().statFile(input_file.?)).size,
     });
 
-    e.rgb = if (e.src.channels == 3 and e.src.depth == 8) src.data else try src.toRGB8(allocator);
-    defer if (!(e.src.channels == 3 and e.src.depth == 8)) allocator.free(e.rgb);
+    e.rgb = if (e.src.channels == 3 and !e.src.hbd) src.data else try src.toRGB8(allocator);
+    defer if (!(e.src.channels == 3 and !e.src.hbd)) allocator.free(e.rgb);
     e.w = @intCast(e.src.width);
     e.h = @intCast(e.src.height);
 
-    print("Searching [tgt {}±{d:.1}, speed {}, {}-pass]\n", .{ o.score_tgt, o.tolerance, o.speed, o.max_pass });
+    const out_depth: u8 = if (o.tenbit) 10 else if (e.src.hbd) 10 else 8;
+    print("Searching [tgt {}±{d:.1}, speed {}, {}-bit]\n", .{ o.score_tgt, o.tolerance, o.speed, out_depth });
 
     try tq.findTargetQuality(&e, allocator);
     defer e.buf.deinitCache(allocator);
