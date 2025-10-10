@@ -18,7 +18,7 @@ const ARG_TENBIT: [:0]const u8 = "--tenbit";
 const ARG_TOLERANCE: [:0]const u8 = "--tolerance";
 const ARG_MAX_PASS: [:0]const u8 = "--max-pass";
 
-// libaom image tune, used when there is no alpha channel
+// libaom image tune
 pub const TuneMode = enum {
     ssim,
     iq,
@@ -54,16 +54,15 @@ pub const AvifEncOptions = struct {
     tolerance: f64 = 2.0,
     max_pass: u8 = 6,
 
-    pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder, alpha: bool) !void {
+    pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) !void {
         encoder.qualityAlpha = options.quality_alpha;
         encoder.speed = options.speed;
         encoder.maxThreads = options.max_threads;
         encoder.tileRowsLog2 = options.tile_rows_log2;
         encoder.tileColsLog2 = options.tile_cols_log2;
         encoder.autoTiling = @intFromBool(options.auto_tiling);
-        if (!alpha)
-            if (c.avifEncoderSetCodecSpecificOption(encoder, "tune", options.tune.toString()) != c.AVIF_RESULT_OK)
-                return error.InvalidCodecOption;
+        if (c.avifEncoderSetCodecSpecificOption(encoder, "tune", options.tune.toString()) != c.AVIF_RESULT_OK)
+            return error.InvalidCodecOption;
     }
 
     pub fn parseArgs(o: *AvifEncOptions, args: [][:0]u8, input_file: *?[]const u8, output_file: *?[]const u8) !void {

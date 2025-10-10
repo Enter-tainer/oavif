@@ -567,7 +567,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     if (avifenc == null) return error.OutOfMemory;
     defer c.avifEncoderDestroy(avifenc);
 
-    try e.o.copyToEncoder(@ptrCast(avifenc), e.src.channels == 4);
+    try e.o.copyToEncoder(@ptrCast(avifenc));
 
     avifenc.*.quality = @intCast(e.q);
     avifenc.*.qualityAlpha = @intCast(e.q);
