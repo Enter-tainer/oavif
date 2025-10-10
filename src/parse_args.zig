@@ -189,7 +189,7 @@ pub fn printUsage() void {
         \\ --tune str
         \\    libaom tuning mode (ssim, iq, ssimulacra2) [iq]
         \\ --tenbit 0/1
-        \\    10-bit AVIF encoding [0]
+        \\    force 10-bit AVIF output [0]
         \\ --tolerance f64
         \\    target quality error tolerance (1..100) [2]
         \\ --max-pass u8

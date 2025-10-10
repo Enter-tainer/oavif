@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const c = @cImport({
+    @cInclude("stdlib.h");
     @cInclude("libspng/spng.h");
     @cInclude("jpeglib.h");
     @cInclude("webp/decode.h");
@@ -29,14 +30,20 @@ pub fn printVersion(version: []const u8) void {
     print("libjpeg-turbo {d}.{d}.{d} ", .{ jpeg_major, jpeg_minor, jpeg_patch });
     print("[simd: {}]\n", .{jpeg_simd});
     print("libwebp {d}.{d}.{d}\n", .{ webp_major, webp_minor, webp_patch });
-    print("libavif {d}.{d}.{d}\n", .{ avif_major, avif_minor, avif_patch });
+    print("libavif {d}.{d}.{d} (", .{ avif_major, avif_minor, avif_patch });
+
+    var ver_buf: [256]u8 = undefined;
+    c.avifCodecVersions(&ver_buf);
+    const ver_str = std.mem.span(@as([*:0]u8, @ptrCast(&ver_buf)));
+    print("{s})\n", .{ver_str});
 }
 
-// Decode functions
+// Image data structure
 pub const Image = struct {
     width: usize,
     height: usize,
     channels: u8, // 1=Gray,2=GrayA,3=RGB,4=RGBA
+    depth: u8, // bit depth: 8, 10, or 16
     data: []u8, // interleaved, row-major
 
     pub fn deinit(img: *Image, allocator: std.mem.Allocator) void {
@@ -47,67 +54,100 @@ pub const Image = struct {
     pub fn toRGB8(img: *Image, allocator: std.mem.Allocator) ![]u8 {
         const pixels = img.width * img.height;
         const rgb = try allocator.alloc(u8, pixels * 3);
-        switch (img.channels) {
-            3 => {
-                // direct copy
-                for (0..pixels) |i| {
-                    rgb[i * 3 + 0] = img.data[i * 3 + 0];
-                    rgb[i * 3 + 1] = img.data[i * 3 + 1];
-                    rgb[i * 3 + 2] = img.data[i * 3 + 2];
-                }
-            },
-            4 => {
-                for (0..pixels) |i| {
-                    rgb[i * 3 + 0] = img.data[i * 4 + 0];
-                    rgb[i * 3 + 1] = img.data[i * 4 + 1];
-                    rgb[i * 3 + 2] = img.data[i * 4 + 2];
-                }
-            },
-            1 => {
-                // replicate grayscale channel
-                for (0..pixels) |i| {
-                    const g = img.data[i];
-                    rgb[i * 3 + 0] = g;
-                    rgb[i * 3 + 1] = g;
-                    rgb[i * 3 + 2] = g;
-                }
-            },
-            2 => {
-                // grayscale + alpha -> ignore alpha
-                for (0..pixels) |i| {
-                    const g = img.data[i * 2 + 0];
-                    rgb[i * 3 + 0] = g;
-                    rgb[i * 3 + 1] = g;
-                    rgb[i * 3 + 2] = g;
-                }
-            },
-            else => return error.UnsupportedChannelCount,
+
+        if (img.depth == 16) {
+            // downscale to 8-bit
+            const src_u16 = @as([*]const u16, @ptrCast(@alignCast(img.data.ptr)));
+            switch (img.channels) {
+                3 => {
+                    for (0..pixels) |i| {
+                        rgb[i * 3 + 0] = @intCast(src_u16[i * 3 + 0] >> 8);
+                        rgb[i * 3 + 1] = @intCast(src_u16[i * 3 + 1] >> 8);
+                        rgb[i * 3 + 2] = @intCast(src_u16[i * 3 + 2] >> 8);
+                    }
+                },
+                4 => {
+                    for (0..pixels) |i| {
+                        rgb[i * 3 + 0] = @intCast(src_u16[i * 4 + 0] >> 8);
+                        rgb[i * 3 + 1] = @intCast(src_u16[i * 4 + 1] >> 8);
+                        rgb[i * 3 + 2] = @intCast(src_u16[i * 4 + 2] >> 8);
+                    }
+                },
+                1 => {
+                    for (0..pixels) |i| {
+                        const g: u8 = @intCast(src_u16[i] >> 8);
+                        rgb[i * 3 + 0] = g;
+                        rgb[i * 3 + 1] = g;
+                        rgb[i * 3 + 2] = g;
+                    }
+                },
+                2 => {
+                    for (0..pixels) |i| {
+                        const g: u8 = @intCast(src_u16[i * 2 + 0] >> 8);
+                        rgb[i * 3 + 0] = g;
+                        rgb[i * 3 + 1] = g;
+                        rgb[i * 3 + 2] = g;
+                    }
+                },
+                else => return error.UnsupportedChannelCount,
+            }
+        } else {
+            switch (img.channels) {
+                3 => {
+                    for (0..pixels) |i| {
+                        rgb[i * 3 + 0] = img.data[i * 3 + 0];
+                        rgb[i * 3 + 1] = img.data[i * 3 + 1];
+                        rgb[i * 3 + 2] = img.data[i * 3 + 2];
+                    }
+                },
+                4 => {
+                    for (0..pixels) |i| {
+                        rgb[i * 3 + 0] = img.data[i * 4 + 0];
+                        rgb[i * 3 + 1] = img.data[i * 4 + 1];
+                        rgb[i * 3 + 2] = img.data[i * 4 + 2];
+                    }
+                },
+                1 => {
+                    for (0..pixels) |i| {
+                        const g = img.data[i];
+                        rgb[i * 3 + 0] = g;
+                        rgb[i * 3 + 1] = g;
+                        rgb[i * 3 + 2] = g;
+                    }
+                },
+                2 => {
+                    for (0..pixels) |i| {
+                        const g = img.data[i * 2 + 0];
+                        rgb[i * 3 + 0] = g;
+                        rgb[i * 3 + 1] = g;
+                        rgb[i * 3 + 2] = g;
+                    }
+                },
+                else => return error.UnsupportedChannelCount,
+            }
         }
         return rgb;
     }
 };
 
 pub fn loadImage(allocator: std.mem.Allocator, path: []const u8) !Image {
-    if (hasExtension(path, ".png"))
-        return loadPNG(allocator, path)
-    else if (hasExtension(path, ".pam"))
-        return loadPAM(allocator, path)
-    else if (hasExtension(path, ".jpg") or hasExtension(path, ".jpeg"))
-        return loadJPEG(allocator, path)
-    else if (hasExtension(path, ".webp"))
-        return loadWebP(allocator, path)
-    else if (hasExtension(path, ".avif"))
-        return loadAVIF(allocator, path)
-    else {
-        print("Error: Unrecognized image format; fssimu2 supports PNG, PAM, JPG, WEBP, or AVIF\n", .{});
-        return error.UnrecognizedImageFormat;
+    if (hasExtension(path, ".jpg") or hasExtension(path, ".jpeg")) {
+        return loadJPEG(allocator, path);
+    } else if (hasExtension(path, ".png")) {
+        return loadPNG(allocator, path);
+    } else if (hasExtension(path, ".pam")) {
+        return loadPAM(allocator, path);
+    } else if (hasExtension(path, ".webp")) {
+        return loadWebP(allocator, path);
+    } else if (hasExtension(path, ".avif")) {
+        return loadAVIF(allocator, path);
+    } else {
+        return error.UnsupportedImageFormat;
     }
 }
 
 fn hasExtension(path: []const u8, ext: []const u8) bool {
-    if (path.len < ext.len) return false;
-    const tail = path[path.len - ext.len ..];
-    return std.ascii.eqlIgnoreCase(tail, ext);
+    return std.mem.endsWith(u8, path, ext) or std.mem.endsWith(u8, path, std.ascii.upperString(@constCast(ext[0..]), ext));
 }
 
 pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
@@ -163,9 +203,10 @@ pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
         return error.JPEGFinishDecompressFailed;
 
     return .{
-        .width = @intCast(width),
-        .height = @intCast(height),
+        .width = width,
+        .height = height,
         .channels = @intCast(channels),
+        .depth = 8,
         .data = out_buf,
     };
 }
@@ -189,14 +230,18 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
     if (c.spng_get_ihdr(ctx, &ihdr) != 0)
         return error.GetHeaderFailed;
 
-    // prefer RGB8 (ignore alpha), but if alpha, decode RGBA8 & strip later.
-    const fmt: c_int = switch (ihdr.color_type) {
-        c.SPNG_COLOR_TYPE_TRUECOLOR => c.SPNG_FMT_RGB8,
-        c.SPNG_COLOR_TYPE_TRUECOLOR_ALPHA => c.SPNG_FMT_RGBA8,
-        c.SPNG_COLOR_TYPE_GRAYSCALE => c.SPNG_FMT_RGBA8, // libspng expands to RGBA; we'll drop A later
-        c.SPNG_COLOR_TYPE_GRAYSCALE_ALPHA => c.SPNG_FMT_RGBA8,
-        c.SPNG_COLOR_TYPE_INDEXED => c.SPNG_FMT_RGBA8,
-        else => c.SPNG_FMT_RGBA8,
+    const is_16bit = ihdr.bit_depth == 16;
+    const fmt: c_int = if (is_16bit) blk: {
+        break :blk c.SPNG_FMT_RGBA16;
+    } else blk: {
+        break :blk switch (ihdr.color_type) {
+            c.SPNG_COLOR_TYPE_TRUECOLOR => c.SPNG_FMT_RGB8,
+            c.SPNG_COLOR_TYPE_TRUECOLOR_ALPHA => c.SPNG_FMT_RGBA8,
+            c.SPNG_COLOR_TYPE_GRAYSCALE => c.SPNG_FMT_RGBA8,
+            c.SPNG_COLOR_TYPE_GRAYSCALE_ALPHA => c.SPNG_FMT_RGBA8,
+            c.SPNG_COLOR_TYPE_INDEXED => c.SPNG_FMT_RGBA8,
+            else => c.SPNG_FMT_RGBA8,
+        };
     };
 
     var out_size: usize = 0;
@@ -207,15 +252,18 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
 
     if (c.spng_decode_image(ctx, out_buf.ptr, out_size, fmt, 0) != 0) return error.DecodeFailed;
 
-    const channels: u8 = switch (fmt) {
+    const channels: u8 = if (is_16bit) 4 else switch (fmt) {
         c.SPNG_FMT_RGB8 => 3,
         else => 4,
     };
+
+    const depth: u8 = if (is_16bit) 16 else 8;
 
     return .{
         .width = ihdr.width,
         .height = ihdr.height,
         .channels = channels,
+        .depth = depth,
         .data = out_buf,
     };
 }
@@ -313,6 +361,7 @@ pub fn loadPAM(allocator: std.mem.Allocator, path: []const u8) !Image {
         .width = width,
         .height = height,
         .channels = channels,
+        .depth = 8,
         .data = out,
     };
 }
@@ -350,6 +399,7 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
         .width = @intCast(width),
         .height = @intCast(height),
         .channels = channels,
+        .depth = 8,
         .data = out_buf,
     };
 }
@@ -359,52 +409,51 @@ const AvifDecodeResult = struct {
     rgb: c.avifRGBImage,
 };
 
-fn decodeAvifCommon(data: []const u8, force_rgb: bool) !AvifDecodeResult {
+fn decodeAvifCommon(avif_data: []const u8, use_8bit: bool) !AvifDecodeResult {
     const decoder = c.avifDecoderCreate();
-    if (decoder == null) return error.AvifCreateDecoderFailed;
+    if (decoder == null) return error.OutOfMemory;
+    errdefer c.avifDecoderDestroy(decoder);
 
-    var r = c.avifDecoderSetIOMemory(decoder, data.ptr, data.len);
-    if (r != c.AVIF_RESULT_OK) return error.AvifSetIOMemoryFailed;
+    const parse_result = c.avifDecoderSetIOMemory(decoder, avif_data.ptr, avif_data.len);
+    if (parse_result != c.AVIF_RESULT_OK) return error.SetIOFailed;
 
-    r = c.avifDecoderParse(decoder);
-    if (r != c.AVIF_RESULT_OK) return error.AvifParseFailed;
+    if (c.avifDecoderParse(decoder) != c.AVIF_RESULT_OK)
+        return error.ParseFailed;
 
-    r = c.avifDecoderNextImage(decoder);
-    if (r != c.AVIF_RESULT_OK) return error.AvifNoImageDecoded;
+    if (c.avifDecoderNextImage(decoder) != c.AVIF_RESULT_OK)
+        return error.DecodeImageFailed;
 
-    var rgb = c.avifRGBImage{};
-    c.avifRGBImageSetDefaults(&rgb, decoder.*.image);
+    const img = decoder.*.image;
+    var rgb: c.avifRGBImage = undefined;
+    c.avifRGBImageSetDefaults(&rgb, img);
 
-    rgb.format =
-        if (force_rgb or decoder.*.image.*.alphaPlane == null)
-            c.AVIF_RGB_FORMAT_RGB
-        else
-            c.AVIF_RGB_FORMAT_RGBA;
-    rgb.depth = 8;
+    if (use_8bit)
+        rgb.depth = 8;
 
-    r = c.avifRGBImageAllocatePixels(&rgb);
-    if (r != c.AVIF_RESULT_OK) return error.AvifAllocatePixelsFailed;
+    rgb.format = if (img.*.alphaPlane != null) c.AVIF_RGB_FORMAT_RGBA else c.AVIF_RGB_FORMAT_RGB;
 
-    r = c.avifImageYUVToRGB(decoder.*.image, &rgb);
-    if (r != c.AVIF_RESULT_OK) return error.AvifYUVToRGBFailed;
+    if (c.avifRGBImageAllocatePixels(&rgb) != c.AVIF_RESULT_OK)
+        return error.AllocatePixelsFailed;
 
-    return .{ .decoder = decoder, .rgb = rgb };
+    if (c.avifImageYUVToRGB(img, &rgb) != c.AVIF_RESULT_OK)
+        return error.ConvertToRGBFailed;
+
+    return .{ .decoder = decoder.?, .rgb = rgb };
 }
 
 fn copyRgbPixels(allocator: std.mem.Allocator, rgb: c.avifRGBImage, width: usize, height: usize) ![]u8 {
-    const row_bytes = rgb.rowBytes;
     const channels: usize = if (rgb.format == c.AVIF_RGB_FORMAT_RGBA) 4 else 3;
-    const out_size = width * height * channels;
-    const out = try allocator.alloc(u8, out_size);
+    const bytes_per_sample: usize = if (rgb.depth > 8) 2 else 1;
+    const out_buf = try allocator.alloc(u8, width * height * channels * bytes_per_sample);
+    errdefer allocator.free(out_buf);
 
-    const src_pixels: [*]const u8 = @ptrCast(rgb.pixels);
     for (0..height) |y| {
-        const src_off = y * row_bytes;
-        const dst_off = y * width * channels;
-        @memcpy(out[dst_off .. dst_off + width * channels], src_pixels[src_off .. src_off + width * channels]);
+        const src_row = rgb.pixels + y * rgb.rowBytes;
+        const dst_row = out_buf[y * width * channels * bytes_per_sample ..];
+        @memcpy(dst_row[0 .. width * channels * bytes_per_sample], src_row[0 .. width * channels * bytes_per_sample]);
     }
 
-    return out;
+    return out_buf;
 }
 
 pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
@@ -425,30 +474,81 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
     const channels: u8 = if (result.rgb.format == c.AVIF_RGB_FORMAT_RGBA) 4 else 3;
 
     const out_buf = try copyRgbPixels(allocator, result.rgb, width, height);
+    const depth: u8 = @intCast(result.rgb.depth);
 
     return .{
         .width = width,
         .height = height,
         .channels = channels,
+        .depth = depth,
         .data = out_buf,
     };
 }
 
-// Encode functions
 pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std.ArrayListAligned(u8, null)) !void {
     const o = &e.o;
-    const image = c.avifImageCreate(e.w, e.h, if (o.tenbit) 10 else 8, c.AVIF_PIXEL_FORMAT_YUV444);
+    const output_depth: u32 = if (o.tenbit) 10 else if (e.src.depth >= 10) 10 else 8;
+
+    const image = c.avifImageCreate(e.w, e.h, output_depth, c.AVIF_PIXEL_FORMAT_YUV444);
     if (image == null) return error.OutOfMemory;
     defer c.avifImageDestroy(image);
 
     var rgb_img = c.avifRGBImage{};
     c.avifRGBImageSetDefaults(&rgb_img, image);
     rgb_img.format = if (e.src.channels == 4) c.AVIF_RGB_FORMAT_RGBA else c.AVIF_RGB_FORMAT_RGB;
-    rgb_img.pixels = @ptrCast(@constCast(e.src.data.ptr));
-    rgb_img.rowBytes = e.w * e.src.channels;
 
-    const convert_result = c.avifImageRGBToYUV(image, &rgb_img);
-    if (convert_result != c.AVIF_RESULT_OK) return error.ConvertFailed;
+    if (e.src.depth == 8 and output_depth == 10) {
+        const pixels = e.w * e.h;
+        const scaled_data = try allocator.alloc(u16, pixels * e.src.channels);
+        defer allocator.free(scaled_data);
+
+        for (0..pixels * e.src.channels) |i|
+            scaled_data[i] = @as(u16, e.src.data[i]) << 2;
+
+        rgb_img.pixels = @ptrCast(scaled_data.ptr);
+        rgb_img.rowBytes = e.w * e.src.channels * 2;
+        rgb_img.depth = 10;
+
+        if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
+            return error.ConvertFailed;
+    } else if (e.src.depth == 16 and output_depth == 10) {
+        const pixels = e.w * e.h;
+        const scaled_data = try allocator.alloc(u16, pixels * e.src.channels);
+        defer allocator.free(scaled_data);
+
+        const src_u16 = @as([*]const u16, @ptrCast(@alignCast(e.src.data.ptr)))[0 .. pixels * e.src.channels];
+        for (0..pixels * e.src.channels) |i|
+            scaled_data[i] = src_u16[i] >> 6;
+
+        rgb_img.pixels = @ptrCast(scaled_data.ptr);
+        rgb_img.rowBytes = e.w * e.src.channels * 2;
+        rgb_img.depth = 10;
+
+        if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
+            return error.ConvertFailed;
+    } else if (e.src.depth == 16 and output_depth == 8) {
+        const pixels = e.w * e.h;
+        const scaled_data = try allocator.alloc(u8, pixels * e.src.channels);
+        defer allocator.free(scaled_data);
+
+        const src_u16 = @as([*]const u16, @ptrCast(@alignCast(e.src.data.ptr)))[0 .. pixels * e.src.channels];
+        for (0..pixels * e.src.channels) |i|
+            scaled_data[i] = @intCast(src_u16[i] >> 8);
+
+        rgb_img.pixels = @ptrCast(scaled_data.ptr);
+        rgb_img.rowBytes = e.w * e.src.channels;
+        rgb_img.depth = 8;
+
+        if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
+            return error.ConvertFailed;
+    } else {
+        rgb_img.pixels = @ptrCast(@constCast(e.src.data.ptr));
+        rgb_img.rowBytes = e.w * e.src.channels * if (e.src.depth > 8) @as(u32, 2) else @as(u32, 1);
+        rgb_img.depth = e.src.depth;
+
+        if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
+            return error.ConvertFailed;
+    }
 
     const avifenc = c.avifEncoderCreate();
     if (avifenc == null) return error.OutOfMemory;
@@ -469,7 +569,6 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     try output.appendSlice(allocator, @as([*]const u8, @ptrCast(avif_output.data))[0..avif_output.size]);
 }
 
-// TODO: Confirm we're using dav1d when possible
 pub fn decodeAvifToRgb(allocator: std.mem.Allocator, avif_data: []const u8) ![]u8 {
     var result = try decodeAvifCommon(avif_data, true);
     defer c.avifRGBImageFreePixels(@ptrCast(&result.rgb));

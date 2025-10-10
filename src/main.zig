@@ -29,7 +29,7 @@ pub const EncCtx = struct {
     q: u32 = 0, // final chosen Q, updated in-loop
     w: u32 = 0, // input width
     h: u32 = 0, // input height
-    rgb: []const u8 = undefined, // decoded input RGB buffer
+    rgb: []const u8 = undefined, // decoded 8-bit input RGB buffer
     src: io.Image = undefined, // input image
     buf: EncBuffer = EncBuffer{}, // compressed AVIF
 };
@@ -74,15 +74,16 @@ pub fn main() !void {
     defer e.src.deinit(allocator);
     const src = &e.src;
 
-    print("Read {}x{}, {s}, {} bytes\n", .{
+    print("Read {}x{}, {s}, {}-bit, {} bytes\n", .{
         src.width,
         src.height,
         if (src.channels > 3) "RGBA" else "RGB",
+        src.depth,
         (try std.fs.cwd().statFile(input_file.?)).size,
     });
 
-    e.rgb = if (e.src.channels == 3) src.data else try src.toRGB8(allocator);
-    defer if (e.src.channels != 3) allocator.free(e.rgb);
+    e.rgb = if (e.src.channels == 3 and e.src.depth == 8) src.data else try src.toRGB8(allocator);
+    defer if (!(e.src.channels == 3 and e.src.depth == 8)) allocator.free(e.rgb);
     e.w = @intCast(e.src.width);
     e.h = @intCast(e.src.height);
 
