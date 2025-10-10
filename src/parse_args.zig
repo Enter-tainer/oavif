@@ -80,7 +80,7 @@ pub const AvifEncOptions = struct {
             } else if (std.mem.eql(u8, arg, ARG_QUALITY_ALPHA)) {
                 o.quality_alpha = @intCast(try intCliArg(&arg_idx, args, 0, 100, ARG_QUALITY_ALPHA));
             } else if (std.mem.eql(u8, arg, ARG_MAX_THREADS)) {
-                o.max_threads = @intCast(try intCliArg(&arg_idx, args, 0, 255, ARG_MAX_THREADS));
+                o.max_threads = @intCast(try intCliArg(&arg_idx, args, 1, 255, ARG_MAX_THREADS));
             } else if (std.mem.eql(u8, arg, ARG_TILE_ROWS_LOG2)) {
                 o.tile_rows_log2 = @intCast(try intCliArg(&arg_idx, args, 0, 6, ARG_TILE_ROWS_LOG2));
             } else if (std.mem.eql(u8, arg, ARG_TILE_COLS_LOG2)) {
@@ -173,13 +173,13 @@ pub fn printUsage() void {
         \\ -v, --version
         \\    show version information
         \\ -s, --speed u8
-        \\    encoder speed (0..10) [6]
+        \\    encoder speed (0..10) [9]
         \\ -t, --score-tgt f64
         \\    target SSIMULACRA2 score (0..100) [80]
         \\ --quality-alpha u8
         \\    quality factor for alpha (0..100=lossless) [100]
         \\ --max-threads u8
-        \\    maximum number of threads to use (0..255) [1]
+        \\    maximum number of threads to use (1..255) [1]
         \\ --tile-rows-log2 u8
         \\    tile rows log2 (0..6) [0]
         \\ --tile-cols-log2 u8
