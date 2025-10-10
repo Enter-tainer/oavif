@@ -165,7 +165,7 @@ fn tuneCliArg(arg_idx: *usize, args: [][:0]u8, arg: [:0]const u8) !TuneMode {
 pub fn printUsage() void {
     print("\n", .{});
     print(
-        \\usage:  avif-tq [encoder_options] <in> <out.avif>
+        \\usage:  oavif [options] <in> <out.avif>
         \\
         \\options:
         \\ -h, --help

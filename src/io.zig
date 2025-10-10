@@ -25,7 +25,7 @@ pub fn printVersion(version: []const u8) void {
     const avif_major: comptime_int = c.AVIF_VERSION_MAJOR;
     const avif_minor: comptime_int = c.AVIF_VERSION_MINOR;
     const avif_patch: comptime_int = c.AVIF_VERSION_PATCH;
-    print("avif-tq {s}\n", .{version});
+    print("oavif {s}\n", .{version});
     print("libjpeg-turbo {d}.{d}.{d} ", .{ jpeg_major, jpeg_minor, jpeg_patch });
     print("[simd: {}]\n", .{jpeg_simd});
     print("libwebp {d}.{d}.{d}\n", .{ webp_major, webp_minor, webp_patch });

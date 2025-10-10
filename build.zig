@@ -48,9 +48,9 @@ pub fn build(b: *std.Build) void {
     spng.addCSourceFiles(.{ .files = &spng_sources });
     spng.addIncludePath(b.path("third-party/"));
 
-    // avif-tq
+    // oavif
     const bin = b.addExecutable(.{
-        .name = "avif-tq",
+        .name = "oavif",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,

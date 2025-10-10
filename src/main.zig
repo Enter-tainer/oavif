@@ -35,7 +35,7 @@ pub const EncCtx = struct {
 };
 
 pub fn main() !void {
-    print("\x1b[31mavif-tq\x1b[0m | {s}\n", .{VERSION});
+    print("\x1b[31moavif\x1b[0m | {s}\n", .{VERSION});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
