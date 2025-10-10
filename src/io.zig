@@ -147,7 +147,14 @@ pub fn loadImage(allocator: std.mem.Allocator, path: []const u8) !Image {
 }
 
 fn hasExtension(path: []const u8, ext: []const u8) bool {
-    return std.mem.endsWith(u8, path, ext) or std.mem.endsWith(u8, path, std.ascii.upperString(@constCast(ext[0..]), ext));
+    if (std.mem.endsWith(u8, path, ext))
+        return true;
+    var upper_ext_buf: [10]u8 = undefined;
+    if (ext.len <= upper_ext_buf.len) {
+        const upper_ext = std.ascii.upperString(upper_ext_buf[0..ext.len], ext);
+        return std.mem.endsWith(u8, path, upper_ext);
+    }
+    return false;
 }
 
 pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
