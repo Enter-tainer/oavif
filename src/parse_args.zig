@@ -49,7 +49,7 @@ pub const AvifEncOptions = struct {
     tile_cols_log2: u8 = 0,
     auto_tiling: bool = true,
     score_tgt: f64 = 80.0,
-    tenbit: bool = false,
+    tenbit: bool = true,
     tune: TuneMode = .iq,
     tolerance: f64 = 2.0,
     max_pass: u8 = 6,
@@ -162,6 +162,7 @@ fn tuneCliArg(arg_idx: *usize, args: [][:0]u8, arg: [:0]const u8) !TuneMode {
 }
 
 pub fn printUsage() void {
+    const d: AvifEncOptions = AvifEncOptions{};
     print("\n", .{});
     print(
         \\usage:  oavif [options] <in> <out.avif>
@@ -172,27 +173,39 @@ pub fn printUsage() void {
         \\ -v, --version
         \\    show version information
         \\ -s, --speed u8
-        \\    encoder speed (0..10) [9]
+        \\    encoder speed (0..10) [{d}]
         \\ -t, --score-tgt f64
-        \\    target SSIMULACRA2 score (0..100) [80]
+        \\    target SSIMULACRA2 score (0..100) [{d:.0}]
         \\ --quality-alpha u8
-        \\    quality factor for alpha (0..100=lossless) [100]
+        \\    quality factor for alpha (0..100=lossless) [{d}]
         \\ --max-threads u8
-        \\    maximum number of threads to use (1..255) [1]
+        \\    maximum number of threads to use (1..255) [{d}]
         \\ --tile-rows-log2 u8
-        \\    tile rows log2 (0..6) [0]
+        \\    tile rows log2 (0..6) [{d}]
         \\ --tile-cols-log2 u8
-        \\    tile columns log2 (0..6) [0]
+        \\    tile columns log2 (0..6) [{d}]
         \\ --auto-tiling 0/1
-        \\    enable automatic tiling [1]
+        \\    enable automatic tiling [{d}]
         \\ --tune str
-        \\    libaom tuning mode (ssim, iq, ssimulacra2) [iq]
+        \\    libaom tuning mode (ssim, iq, ssimulacra2) [{s}]
         \\ --tenbit 0/1
-        \\    force 10-bit AVIF output [0]
+        \\    force 10-bit AVIF output [{d}]
         \\ --tolerance f64
-        \\    target quality error tolerance (1..100) [2]
+        \\    target quality error tolerance (1..100) [{d:.0}]
         \\ --max-pass u8
-        \\    maximum search passes (1..12) [6]
-    , .{});
+        \\    maximum search passes (1..12) [{d}]
+    , .{
+        d.speed,
+        d.score_tgt,
+        d.quality_alpha,
+        d.max_threads,
+        d.tile_rows_log2,
+        d.tile_cols_log2,
+        @intFromBool(d.auto_tiling),
+        d.tune.toString(),
+        @intFromBool(d.tenbit),
+        d.tolerance,
+        d.max_pass,
+    });
     print("\n\n\x1b[37mInput image formats: PNG, PAM, JPEG, WebP, or AVIF\x1b[0m\n", .{});
 }
