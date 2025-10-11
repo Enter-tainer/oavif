@@ -1,3 +1,4 @@
+.ruff_cache/
 .zig-cache/
 zig-out/
 *.o

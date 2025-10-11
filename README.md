@@ -40,6 +40,25 @@ options:
 Input image formats: PNG, PAM, JPEG, WebP, or AVIF
 ```
 
+A script is included in the `scripts/` directory to test oavif's performance on a directory of images.
+```
+./scripts/measure.py --help
+usage: measure.py [-h] [--tolerance TOLERANCE]
+                  images_dir oavif_path output_csv
+
+Measure oavif performance on a directory of images
+
+positional arguments:
+  images_dir            Directory containing input images
+  oavif_path            Path to oavif binary
+  output_csv            Output CSV file path
+
+options:
+  -h, --help            show this help message and exit
+  --tolerance TOLERANCE
+                        Tolerance value for oavif encoding
+```
+
 ## Compilation
 
 Compilation requires:
