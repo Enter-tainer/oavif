@@ -5,6 +5,7 @@ const c = @cImport({
     @cInclude("libspng/spng.h");
     @cInclude("jpeglib.h");
     @cInclude("webp/decode.h");
+    @cInclude("webp/demux.h");
     @cInclude("avif/avif.h");
 });
 
@@ -420,18 +421,43 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
     const has_alpha = features.has_alpha != 0;
     const channels: u8 = if (has_alpha) 4 else 3;
 
+    var icc_profile: ?[]u8 = null;
+    var webp_data = c.WebPData{ .bytes = buf.ptr, .size = buf.len };
+    const demux = c.WebPDemux(&webp_data);
+    if (demux != null) {
+        defer c.WebPDemuxDelete(demux);
+
+        const flags = c.WebPDemuxGetI(demux, c.WEBP_FF_FORMAT_FLAGS);
+        if ((flags & c.ICCP_FLAG) != 0) {
+            var chunk_iter: c.WebPChunkIterator = undefined;
+            if (c.WebPDemuxGetChunk(demux, "ICCP", 1, &chunk_iter) != 0) {
+                defer c.WebPDemuxReleaseChunkIterator(&chunk_iter);
+                if (chunk_iter.chunk.size > 0 and chunk_iter.chunk.bytes != null) {
+                    icc_profile = try allocator.alloc(u8, chunk_iter.chunk.size);
+                    @memcpy(icc_profile.?, chunk_iter.chunk.bytes[0..chunk_iter.chunk.size]);
+                }
+            }
+        }
+    }
+
     var width: c_int = 0;
     var height: c_int = 0;
     const data = if (has_alpha)
         c.WebPDecodeRGBA(buf.ptr, buf.len, &width, &height)
     else
         c.WebPDecodeRGB(buf.ptr, buf.len, &width, &height);
-    if (data == null) return error.WebPDecodeFailed;
+    if (data == null) {
+        if (icc_profile) |icc| allocator.free(icc);
+        return error.WebPDecodeFailed;
+    }
     defer c.WebPFree(data);
 
     const out_size = @as(usize, @intCast(width)) * @as(usize, @intCast(height)) * channels;
     const out_buf = try allocator.alloc(u8, out_size);
-    errdefer allocator.free(out_buf);
+    errdefer {
+        allocator.free(out_buf);
+        if (icc_profile) |icc| allocator.free(icc);
+    }
     @memcpy(out_buf, @as([*]const u8, @ptrCast(data))[0..out_size]);
 
     return .{
@@ -440,7 +466,7 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = false,
         .data = out_buf,
-        .icc_profile = null,
+        .icc_profile = icc_profile,
     };
 }
 

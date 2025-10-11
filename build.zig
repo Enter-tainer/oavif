@@ -72,6 +72,7 @@ pub fn build(b: *std.Build) void {
     // system decoder libs
     bin.linkSystemLibrary("jpeg");
     bin.linkSystemLibrary("webp");
+    bin.root_module.linkSystemLibrary("webpdemux", .{});
     bin.linkSystemLibrary("avif");
 
     b.installArtifact(bin);

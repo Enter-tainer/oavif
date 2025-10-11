@@ -46,6 +46,7 @@ Compilation requires:
 - Zig 0.15.1
 - libavif
 - libwebp
+- libwebpdemux
 - libjpeg-turbo
 
 ```sh
