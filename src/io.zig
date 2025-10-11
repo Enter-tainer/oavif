@@ -45,9 +45,12 @@ pub const Image = struct {
     channels: u8, // 1=Gray,2=GrayA,3=RGB,4=RGBA
     hbd: bool, // high bit depth (16-bit)
     data: []u8, // interleaved, row-major
+    icc_profile: ?[]u8 = null, // ICC color profile data
 
     pub fn deinit(img: *Image, allocator: std.mem.Allocator) void {
         allocator.free(img.data);
+        if (img.icc_profile) |icc|
+            allocator.free(icc);
         img.* = undefined;
     }
 
@@ -175,18 +178,28 @@ pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
     defer c.jpeg_destroy_decompress(&cinfo);
 
     c.jpeg_stdio_src(&cinfo, file_ptr);
+    c.jpeg_save_markers(&cinfo, c.JPEG_APP0 + 2, 0xFFFF);
 
     if (c.jpeg_read_header(&cinfo, c.TRUE) != c.JPEG_HEADER_OK)
         return error.InvalidJPEGHeader;
+
+    var icc_profile: ?[]u8 = null;
+    var icc_data_ptr: [*c]u8 = null;
+    var icc_data_len: c_uint = 0;
+    if (c.jpeg_read_icc_profile(&cinfo, &icc_data_ptr, &icc_data_len) != 0)
+        if (icc_data_len > 0 and icc_data_ptr != null) {
+            icc_profile = try allocator.alloc(u8, icc_data_len);
+            @memcpy(icc_profile.?, icc_data_ptr[0..icc_data_len]);
+            c.free(icc_data_ptr);
+        };
 
     if (cinfo.num_components == 1)
         cinfo.out_color_space = c.JCS_GRAYSCALE
     else
         cinfo.out_color_space = c.JCS_RGB;
 
-    if (c.jpeg_start_decompress(&cinfo) != c.TRUE) {
+    if (c.jpeg_start_decompress(&cinfo) != c.TRUE)
         return error.JPEGDecompressFailed;
-    }
 
     const width: usize = @intCast(cinfo.output_width);
     const height: usize = @intCast(cinfo.output_height);
@@ -194,20 +207,27 @@ pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
 
     const row_stride: usize = width * channels;
     const out_buf: []u8 = try allocator.alloc(u8, height * row_stride);
-    errdefer allocator.free(out_buf);
+    errdefer {
+        allocator.free(out_buf);
+        if (icc_profile) |icc| allocator.free(icc);
+    }
 
     const row_buf = try allocator.alloc(u8, row_stride);
     defer allocator.free(row_buf);
 
     for (0..height) |y| {
         var row_pointers: [1][*c]u8 = .{row_buf.ptr};
-        if (c.jpeg_read_scanlines(&cinfo, &row_pointers, 1) != 1)
+        if (c.jpeg_read_scanlines(&cinfo, &row_pointers, 1) != 1) {
+            if (icc_profile) |icc| allocator.free(icc);
             return error.JPEGReadScanlinesFailed;
+        }
         @memcpy(out_buf[y * row_stride .. (y + 1) * row_stride], row_buf);
     }
 
-    if (c.jpeg_finish_decompress(&cinfo) != c.TRUE)
+    if (c.jpeg_finish_decompress(&cinfo) != c.TRUE) {
+        if (icc_profile) |icc| allocator.free(icc);
         return error.JPEGFinishDecompressFailed;
+    }
 
     return .{
         .width = width,
@@ -215,6 +235,7 @@ pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = @intCast(channels),
         .hbd = false,
         .data = out_buf,
+        .icc_profile = icc_profile,
     };
 }
 
@@ -237,6 +258,14 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
     if (c.spng_get_ihdr(ctx, &ihdr) != 0)
         return error.GetHeaderFailed;
 
+    var icc_profile: ?[]u8 = null;
+    var iccp: c.struct_spng_iccp = undefined;
+    if (c.spng_get_iccp(ctx, &iccp) == 0)
+        if (iccp.profile_len > 0 and iccp.profile != null) {
+            icc_profile = try allocator.alloc(u8, iccp.profile_len);
+            @memcpy(icc_profile.?, iccp.profile[0..iccp.profile_len]);
+        };
+
     const is_16bit = ihdr.bit_depth == 16;
     const fmt: c_int = if (is_16bit) blk: {
         break :blk c.SPNG_FMT_RGBA16;
@@ -257,7 +286,10 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
     const out_buf = try allocator.alloc(u8, out_size);
     errdefer allocator.free(out_buf);
 
-    if (c.spng_decode_image(ctx, out_buf.ptr, out_size, fmt, 0) != 0) return error.DecodeFailed;
+    if (c.spng_decode_image(ctx, out_buf.ptr, out_size, fmt, 0) != 0) {
+        if (icc_profile) |icc| allocator.free(icc);
+        return error.DecodeFailed;
+    }
 
     const channels: u8 = if (is_16bit) 4 else switch (fmt) {
         c.SPNG_FMT_RGB8 => 3,
@@ -270,6 +302,7 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = is_16bit,
         .data = out_buf,
+        .icc_profile = icc_profile,
     };
 }
 
@@ -368,6 +401,7 @@ pub fn loadPAM(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = false,
         .data = out,
+        .icc_profile = null,
     };
 }
 
@@ -406,6 +440,7 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = false,
         .data = out_buf,
+        .icc_profile = null,
     };
 }
 
@@ -478,7 +513,14 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
     const height: usize = @intCast(img_ptr.*.height);
     const channels: u8 = if (result.rgb.format == c.AVIF_RGB_FORMAT_RGBA) 4 else 3;
 
+    var icc_profile: ?[]u8 = null;
+    if (img_ptr.*.icc.size > 0 and img_ptr.*.icc.data != null) {
+        icc_profile = try allocator.alloc(u8, img_ptr.*.icc.size);
+        @memcpy(icc_profile.?, img_ptr.*.icc.data[0..img_ptr.*.icc.size]);
+    }
+
     const out_buf = try copyRgbPixels(allocator, result.rgb, width, height);
+    errdefer allocator.free(out_buf);
 
     const hbd: bool = result.rgb.depth > 8;
     if (hbd) {
@@ -495,6 +537,7 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = hbd,
         .data = out_buf,
+        .icc_profile = icc_profile,
     };
 }
 
@@ -505,6 +548,12 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     const image = c.avifImageCreate(e.w, e.h, output_depth, c.AVIF_PIXEL_FORMAT_YUV444);
     if (image == null) return error.OutOfMemory;
     defer c.avifImageDestroy(image);
+
+    if (e.src.icc_profile) |icc| {
+        const result = c.avifImageSetProfileICC(image, icc.ptr, icc.len);
+        if (result != c.AVIF_RESULT_OK)
+            return error.SetICCProfileFailed;
+    }
 
     var rgb_img = c.avifRGBImage{};
     c.avifRGBImageSetDefaults(&rgb_img, image);
