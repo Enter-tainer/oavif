@@ -43,10 +43,10 @@ pub fn build(b: *std.Build) void {
         "third-party/libspng/spng.c",
         "third-party/libminiz/miniz.c",
     };
-    spng.linkLibC();
-    spng.linkSystemLibrary("m");
-    spng.addCSourceFiles(.{ .files = &spng_sources });
-    spng.addIncludePath(b.path("third-party/"));
+    spng.root_module.link_libc = true;
+    spng.root_module.linkSystemLibrary("m", .{});
+    spng.root_module.addCSourceFiles(.{ .files = &spng_sources });
+    spng.root_module.addIncludePath(b.path("third-party/"));
 
     // oavif
     const bin = b.addExecutable(.{
@@ -59,20 +59,20 @@ pub fn build(b: *std.Build) void {
         }),
     });
     bin.root_module.addOptions("build_opts", options);
-    bin.addIncludePath(b.path("src"));
-    bin.addIncludePath(b.path("src/include"));
-    bin.addIncludePath(b.path("third-party/"));
-    bin.linkLibC();
+    bin.root_module.addIncludePath(b.path("src"));
+    bin.root_module.addIncludePath(b.path("src/include"));
+    bin.root_module.addIncludePath(b.path("third-party/"));
+    bin.root_module.link_libc = true;
 
     // local libs
-    bin.linkLibrary(spng);
+    bin.root_module.linkLibrary(spng);
     bin.root_module.addImport("fssimu2", fssimu2.module("fssimu2"));
-    bin.linkLibrary(fssimu2.artifact("ssimu2"));
+    bin.root_module.linkLibrary(fssimu2.artifact("ssimu2"));
 
     // system decoder libs
-    bin.linkSystemLibrary("jpeg");
-    bin.linkSystemLibrary("webp");
-    bin.linkSystemLibrary("avif");
+    bin.root_module.linkSystemLibrary("jpeg", .{});
+    bin.root_module.linkSystemLibrary("webp", .{});
+    bin.root_module.linkSystemLibrary("avif", .{});
 
     b.installArtifact(bin);
 }

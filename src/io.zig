@@ -45,11 +45,11 @@ pub const Image = struct {
     channels: u8, // 1=Gray,2=GrayA,3=RGB,4=RGBA
     hbd: bool, // high bit depth (16-bit)
     data: []u8, // interleaved, row-major
-    icc_profile: ?[]u8 = null, // ICC color profile data
+    icc: ?[]u8 = null, // ICC color profile data
 
     pub fn deinit(img: *Image, allocator: std.mem.Allocator) void {
         allocator.free(img.data);
-        if (img.icc_profile) |icc|
+        if (img.icc) |icc|
             allocator.free(icc);
         img.* = undefined;
     }
@@ -235,7 +235,7 @@ pub fn loadJPEG(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = @intCast(channels),
         .hbd = false,
         .data = out_buf,
-        .icc_profile = icc_profile,
+        .icc = icc_profile,
     };
 }
 
@@ -302,7 +302,7 @@ pub fn loadPNG(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = is_16bit,
         .data = out_buf,
-        .icc_profile = icc_profile,
+        .icc = icc_profile,
     };
 }
 
@@ -401,7 +401,7 @@ pub fn loadPAM(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = false,
         .data = out,
-        .icc_profile = null,
+        .icc = null,
     };
 }
 
@@ -440,7 +440,7 @@ pub fn loadWebP(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = false,
         .data = out_buf,
-        .icc_profile = null,
+        .icc = null,
     };
 }
 
@@ -537,7 +537,7 @@ pub fn loadAVIF(allocator: std.mem.Allocator, path: []const u8) !Image {
         .channels = channels,
         .hbd = hbd,
         .data = out_buf,
-        .icc_profile = icc_profile,
+        .icc = icc_profile,
     };
 }
 
@@ -549,7 +549,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     if (image == null) return error.OutOfMemory;
     defer c.avifImageDestroy(image);
 
-    if (e.src.icc_profile) |icc| {
+    if (e.src.icc) |icc| {
         const result = c.avifImageSetProfileICC(image, icc.ptr, icc.len);
         if (result != c.AVIF_RESULT_OK)
             return error.SetICCProfileFailed;
