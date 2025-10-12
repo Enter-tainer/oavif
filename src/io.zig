@@ -603,10 +603,10 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
 
         if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
             return error.ConvertFailed;
-    } else {
+    } else { // !hbd, output depth = 8
         rgb_img.pixels = @ptrCast(@constCast(e.src.data.ptr));
-        rgb_img.rowBytes = e.w * e.src.channels * if (e.src.hbd) @as(u32, 2) else @as(u32, 1);
-        rgb_img.depth = if (e.src.hbd) 16 else 8;
+        rgb_img.rowBytes = e.w * e.src.channels;
+        rgb_img.depth = 8;
 
         if (c.avifImageRGBToYUV(image, &rgb_img) != c.AVIF_RESULT_OK)
             return error.ConvertFailed;
@@ -637,10 +637,28 @@ pub fn decodeAvifToRgb(allocator: std.mem.Allocator, avif_data: []const u8) ![]u
     defer c.avifDecoderDestroy(result.decoder);
 
     const img = result.decoder.*.image;
-    const width = img.*.width;
-    const height = img.*.height;
+    const width: usize = @intCast(img.*.width);
+    const height: usize = @intCast(img.*.height);
 
-    return try copyRgbPixels(allocator, result.rgb, width, height);
+    // return 8-bit RGB (no alpha) for fssimu2
+    const pixels = width * height;
+    const rgb_out = try allocator.alloc(u8, pixels * 3);
+    errdefer allocator.free(rgb_out);
+
+    const src_channels: usize = if (result.rgb.format == c.AVIF_RGB_FORMAT_RGBA) 4 else 3;
+
+    for (0..height) |y| {
+        const src_row = result.rgb.pixels + y * result.rgb.rowBytes;
+        for (0..width) |x| {
+            const src_idx = x * src_channels;
+            const dst_idx = (y * width + x) * 3;
+            rgb_out[dst_idx + 0] = src_row[src_idx + 0];
+            rgb_out[dst_idx + 1] = src_row[src_idx + 1];
+            rgb_out[dst_idx + 2] = src_row[src_idx + 2];
+        }
+    }
+
+    return rgb_out;
 }
 
 pub fn encodeAvifToFile(e: *EncCtx, allocator: std.mem.Allocator, output_path: []const u8) !void {
