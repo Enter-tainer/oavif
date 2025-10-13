@@ -17,6 +17,7 @@ const ARG_TUNE: [:0]const u8 = "--tune";
 const ARG_TENBIT: [:0]const u8 = "--tenbit";
 const ARG_TOLERANCE: [:0]const u8 = "--tolerance";
 const ARG_MAX_PASS: [:0]const u8 = "--max-pass";
+const ARG_QUALITY: [:0]const u8 = "--quality";
 
 // libaom image tune
 pub const TuneMode = enum {
@@ -53,6 +54,7 @@ pub const AvifEncOptions = struct {
     tune: TuneMode = .iq,
     tolerance: f64 = 2.0,
     max_pass: u8 = 6,
+    quality: ?u32 = null,
 
     pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) !void {
         encoder.qualityAlpha = options.quality_alpha;
@@ -94,6 +96,8 @@ pub const AvifEncOptions = struct {
                 o.tolerance = try floatCliArg(&arg_idx, args, 1.0, 100.0, ARG_TOLERANCE);
             } else if (std.mem.eql(u8, arg, ARG_MAX_PASS)) {
                 o.max_pass = @intCast(try intCliArg(&arg_idx, args, 1, 12, ARG_MAX_PASS));
+            } else if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, ARG_QUALITY)) {
+                o.quality = @intCast(try intCliArg(&arg_idx, args, 0, 100, ARG_QUALITY));
             } else if (input_file.* == null) {
                 input_file.* = arg;
             } else if (output_file.* == null) {
@@ -194,6 +198,8 @@ pub fn printUsage() void {
         \\    target quality error tolerance (1..100) [{d:.0}]
         \\ --max-pass u8
         \\    maximum search passes (1..12) [{d}]
+        \\ -q, --quality u8
+        \\    quantizer (0..100), bypasses search
     , .{
         d.speed,
         d.score_tgt,

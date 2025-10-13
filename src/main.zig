@@ -89,12 +89,20 @@ pub fn main() !void {
     e.h = @intCast(e.src.height);
 
     const out_depth: u8 = if (o.tenbit) 10 else if (e.src.hbd) 10 else 8;
-    print("Searching [tgt {}±{d:.1}, speed {}, {}-bit]\n", .{ o.score_tgt, o.tolerance, o.speed, out_depth });
 
+    if (o.quality) |q| { // bypass TQ
+        e.q = q;
+        print("Encoding [q{}, speed {}, {}-bit]\n", .{ q, o.speed, out_depth });
+        try io.encodeAvifToFile(&e, allocator, output_path);
+        const bpp: f64 = @as(f64, @floatFromInt(e.buf.size * 8)) / @as(f64, @floatFromInt(e.w * e.h));
+        print("Compressed to {} bytes ({d:.3} bpp)\n", .{ e.buf.size, bpp });
+        return;
+    }
+
+    print("Searching [tgt {}±{d:.1}, speed {}, {}-bit]\n", .{ o.score_tgt, o.tolerance, o.speed, out_depth });
     try tq.findTargetQuality(&e, allocator);
     defer e.buf.deinitCache(allocator);
     const buf = &e.buf;
-
     print("Found q{} (score {d:.2}, {} passes)\n", .{ e.q, e.t.score, e.t.num_pass });
 
     // if we have a buffer at the best Q, write

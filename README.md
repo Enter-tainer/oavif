@@ -36,6 +36,8 @@ options:
     target quality error tolerance (1..100) [2]
  --max-pass u8
     maximum search passes (1..12) [6]
+ -q, --quality u8
+    quantizer (0..100), bypasses search
 
 Input image formats: PNG, PAM, JPEG, WebP, or AVIF
 ```
