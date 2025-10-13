@@ -30,24 +30,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // libspng
-    const spng = b.addLibrary(.{
-        .name = "spng",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .strip = strip,
-            .link_libc = true,
-        }),
-    });
-    const spng_sources = [_][]const u8{
-        "third-party/libspng/spng.c",
-        "third-party/libminiz/miniz.c",
-    };
-    spng.root_module.linkSystemLibrary("m", .{});
-    spng.root_module.addCSourceFiles(.{ .files = &spng_sources });
-    spng.root_module.addIncludePath(b.path("third-party/"));
-
     // oavif
     const bin = b.addExecutable(.{
         .name = "oavif",
@@ -64,14 +46,14 @@ pub fn build(b: *std.Build) void {
     bin.root_module.addIncludePath(b.path("src/include"));
     bin.root_module.addIncludePath(b.path("third-party/"));
 
-    // local libs
-    bin.root_module.linkLibrary(spng);
+    // local import
     bin.root_module.addImport("fssimu2", fssimu2.module("fssimu2"));
 
     // system decoder libs
-    bin.root_module.linkSystemLibrary("jpeg", .{});
-    bin.root_module.linkSystemLibrary("webp", .{});
-    bin.root_module.linkSystemLibrary("avif", .{});
+    bin.root_module.linkSystemLibrary("jpeg", .{ .preferred_link_mode = .static });
+    bin.root_module.linkSystemLibrary("webp", .{ .preferred_link_mode = .static });
+    bin.root_module.linkSystemLibrary("avif", .{ .preferred_link_mode = .static });
+    bin.root_module.linkSystemLibrary("spng", .{ .preferred_link_mode = .static });
 
     b.installArtifact(bin);
 }

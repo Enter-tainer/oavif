@@ -2,7 +2,7 @@ const std = @import("std");
 
 const c = @cImport({
     @cInclude("stdlib.h");
-    @cInclude("libspng/spng.h");
+    @cInclude("spng.h");
     @cInclude("jpeglib.h");
     @cInclude("webp/decode.h");
     @cInclude("avif/avif.h");

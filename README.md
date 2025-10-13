@@ -68,6 +68,7 @@ Compilation requires:
 - libavif
 - libwebp
 - libjpeg-turbo
+- libspng
 
 ```sh
 git clone https://github.com/gianni-rosato/oavif
