@@ -37,13 +37,13 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .strip = strip,
+            .link_libc = true,
         }),
     });
     const spng_sources = [_][]const u8{
         "third-party/libspng/spng.c",
         "third-party/libminiz/miniz.c",
     };
-    spng.root_module.link_libc = true;
     spng.root_module.linkSystemLibrary("m", .{});
     spng.root_module.addCSourceFiles(.{ .files = &spng_sources });
     spng.root_module.addIncludePath(b.path("third-party/"));
@@ -56,18 +56,17 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .strip = strip,
+            .link_libc = true,
         }),
     });
     bin.root_module.addOptions("build_opts", options);
     bin.root_module.addIncludePath(b.path("src"));
     bin.root_module.addIncludePath(b.path("src/include"));
     bin.root_module.addIncludePath(b.path("third-party/"));
-    bin.root_module.link_libc = true;
 
     // local libs
     bin.root_module.linkLibrary(spng);
     bin.root_module.addImport("fssimu2", fssimu2.module("fssimu2"));
-    bin.root_module.linkLibrary(fssimu2.artifact("ssimu2"));
 
     // system decoder libs
     bin.root_module.linkSystemLibrary("jpeg", .{});
