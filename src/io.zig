@@ -549,6 +549,10 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     if (image == null) return error.OutOfMemory;
     defer c.avifImageDestroy(image);
 
+    image.*.colorPrimaries = o.color_primaries;
+    image.*.transferCharacteristics = o.transfer_characteristics;
+    image.*.matrixCoefficients = o.matrix_coefficients;
+
     if (e.src.icc) |icc| {
         const result = c.avifImageSetProfileICC(image, icc.ptr, icc.len);
         if (result != c.AVIF_RESULT_OK)
