@@ -565,7 +565,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
         defer allocator.free(scaled_data);
 
         for (0..pixels * e.src.channels) |i|
-            scaled_data[i] = @as(u16, e.src.data[i]) << 2;
+            scaled_data[i] = @intCast((@as(usize, e.src.data[i]) * 1023 + 127) / 255);
 
         rgb_img.pixels = @ptrCast(scaled_data.ptr);
         rgb_img.rowBytes = e.w * e.src.channels * 2;
