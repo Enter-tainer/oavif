@@ -46,7 +46,7 @@ pub const TuneMode = enum {
 
 // AVIF encoder options – see help menu for member info
 pub const AvifEncOptions = struct {
-    quality_alpha: u8 = @intCast(c.AVIF_QUALITY_LOSSLESS),
+    quality_alpha: u8 = 0,
     speed: u8 = 9,
     max_threads: u8 = 1,
     tile_rows_log2: u8 = 0,
@@ -85,7 +85,7 @@ pub const AvifEncOptions = struct {
             } else if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, ARG_SCORE_TGT)) {
                 o.score_tgt = try floatCliArg(&arg_idx, args, 30.0, 100.0, ARG_SCORE_TGT);
             } else if (std.mem.eql(u8, arg, ARG_QUALITY_ALPHA)) {
-                o.quality_alpha = @intCast(try intCliArg(&arg_idx, args, 0, 100, ARG_QUALITY_ALPHA));
+                o.quality_alpha = @intCast(try intCliArg(&arg_idx, args, 0, 99, ARG_QUALITY_ALPHA));
             } else if (std.mem.eql(u8, arg, ARG_MAX_THREADS)) {
                 o.max_threads = @intCast(try intCliArg(&arg_idx, args, 1, 255, ARG_MAX_THREADS));
             } else if (std.mem.eql(u8, arg, ARG_TILE_ROWS_LOG2)) {
