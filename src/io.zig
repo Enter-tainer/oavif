@@ -619,7 +619,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     try e.o.copyToEncoder(@ptrCast(avifenc));
 
     avifenc.*.quality = @intCast(e.q);
-    avifenc.*.qualityAlpha = @intCast(e.q);
+    avifenc.*.qualityAlpha = @intCast(e.o.quality_alpha);
 
     var avif_output = c.avifRWData{ .data = null, .size = 0 };
     if (c.avifEncoderAddImage(avifenc, image, 1, c.AVIF_ADD_IMAGE_FLAG_SINGLE) != c.AVIF_RESULT_OK)
