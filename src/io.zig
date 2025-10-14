@@ -549,6 +549,10 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     if (image == null) return error.OutOfMemory;
     defer c.avifImageDestroy(image);
 
+    image.*.colorPrimaries = o.color_primaries;
+    image.*.transferCharacteristics = o.transfer_characteristics;
+    image.*.matrixCoefficients = o.matrix_coefficients;
+
     if (e.src.icc) |icc| {
         const result = c.avifImageSetProfileICC(image, icc.ptr, icc.len);
         if (result != c.AVIF_RESULT_OK)
@@ -565,7 +569,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
         defer allocator.free(scaled_data);
 
         for (0..pixels * e.src.channels) |i|
-            scaled_data[i] = @as(u16, e.src.data[i]) << 2;
+            scaled_data[i] = @intCast((@as(usize, e.src.data[i]) * 1023 + 127) / 255);
 
         rgb_img.pixels = @ptrCast(scaled_data.ptr);
         rgb_img.rowBytes = e.w * e.src.channels * 2;
@@ -619,7 +623,7 @@ pub fn encodeAvifToBuffer(e: *EncCtx, allocator: std.mem.Allocator, output: *std
     try e.o.copyToEncoder(@ptrCast(avifenc));
 
     avifenc.*.quality = @intCast(e.q);
-    avifenc.*.qualityAlpha = @intCast(e.q);
+    avifenc.*.qualityAlpha = @intCast(e.o.quality_alpha);
 
     var avif_output = c.avifRWData{ .data = null, .size = 0 };
     if (c.avifEncoderAddImage(avifenc, image, 1, c.AVIF_ADD_IMAGE_FLAG_SINGLE) != c.AVIF_RESULT_OK)

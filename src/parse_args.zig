@@ -18,6 +18,9 @@ const ARG_TENBIT: [:0]const u8 = "--tenbit";
 const ARG_TOLERANCE: [:0]const u8 = "--tolerance";
 const ARG_MAX_PASS: [:0]const u8 = "--max-pass";
 const ARG_QUALITY: [:0]const u8 = "--quality";
+const ARG_COLOR_PRIMARIES: [:0]const u8 = "--color-primaries";
+const ARG_TRANSFER_CHARACTERISTICS: [:0]const u8 = "--transfer-characteristics";
+const ARG_MATRIX_COEFFICIENTS: [:0]const u8 = "--matrix-coefficients";
 
 // libaom image tune
 pub const TuneMode = enum {
@@ -55,6 +58,9 @@ pub const AvifEncOptions = struct {
     tolerance: f64 = 2.0,
     max_pass: u8 = 6,
     quality: ?u32 = null,
+    color_primaries: u8 = 2,
+    transfer_characteristics: u8 = 2,
+    matrix_coefficients: u8 = 2,
 
     pub fn copyToEncoder(options: *const AvifEncOptions, encoder: *c.avifEncoder) !void {
         encoder.qualityAlpha = options.quality_alpha;
@@ -98,6 +104,12 @@ pub const AvifEncOptions = struct {
                 o.max_pass = @intCast(try intCliArg(&arg_idx, args, 1, 12, ARG_MAX_PASS));
             } else if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, ARG_QUALITY)) {
                 o.quality = @intCast(try intCliArg(&arg_idx, args, 0, 100, ARG_QUALITY));
+            } else if (std.mem.eql(u8, arg, ARG_COLOR_PRIMARIES)) {
+                o.color_primaries = @intCast(try intCliArg(&arg_idx, args, 1, 22, ARG_COLOR_PRIMARIES));
+            } else if (std.mem.eql(u8, arg, ARG_TRANSFER_CHARACTERISTICS)) {
+                o.transfer_characteristics = @intCast(try intCliArg(&arg_idx, args, 1, 18, ARG_TRANSFER_CHARACTERISTICS));
+            } else if (std.mem.eql(u8, arg, ARG_MATRIX_COEFFICIENTS)) {
+                o.matrix_coefficients = @intCast(try intCliArg(&arg_idx, args, 0, 14, ARG_MATRIX_COEFFICIENTS));
             } else if (input_file.* == null) {
                 input_file.* = arg;
             } else if (output_file.* == null) {
@@ -200,6 +212,12 @@ pub fn printUsage() void {
         \\    maximum search passes (1..12) [{d}]
         \\ -q, --quality u8
         \\    quantizer (0..100), bypasses search
+        \\ --color-primaries u8
+        \\    color primaries (1..22) [{d}]
+        \\ --transfer-characteristics u8
+        \\    transfer characteristics (1..18) [{d}]
+        \\ --matrix-coefficients u8
+        \\    matrix coefficients (0..14) [{d}]
     , .{
         d.speed,
         d.score_tgt,
@@ -212,6 +230,9 @@ pub fn printUsage() void {
         @intFromBool(d.tenbit),
         d.tolerance,
         d.max_pass,
+        d.color_primaries,
+        d.transfer_characteristics,
+        d.matrix_coefficients,
     });
     print("\n\n\x1b[37mInput image formats: PNG, PAM, JPEG, WebP, or AVIF\x1b[0m\n", .{});
 }
